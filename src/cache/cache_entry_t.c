@@ -1,5 +1,5 @@
 #include "cache.h"
-#include "../log.h"
+#include "../utils/log.h"
 
 #include <errno.h>
 #include <stdlib.h>

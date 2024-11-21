@@ -38,24 +38,18 @@ void sendUnsupportedProtocolResponse(int client_socket) {
 }
 
 static int parseURL(const char *url, char *host, char *path, int *port) {
-  char *urlCopy = strdup(url);
-  if (!urlCopy) {
-    return -1;
-  }
-
-  *port = HTTP_PORT;
+    *port = HTTP_PORT;
   // http://host:port/path
-  if (sscanf(urlCopy, "http://%99[^:/]:%d/%1999[^\n]", host, port, path) == 3) {
+  if (sscanf(url, "http://%99[^:/]:%d/%1999[^\n]", host, port, path) == 3) {
     // http://host/path
-  } else if (sscanf(urlCopy, "http://%99[^/]/%1999[^\n]", host, path) == 2) {
+  } else if (sscanf(url, "http://%99[^/]/%1999[^\n]", host, path) == 2) {
     // http://host:port
-  } else if (sscanf(urlCopy, "http://%99[^:/]:%d[^\n]", host, port) == 2) {
+  } else if (sscanf(url, "http://%99[^:/]:%d[^\n]", host, port) == 2) {
     strcpy(path, "");
     // http://host
-  } else if (sscanf(urlCopy, "http://%99[^\n]", host) == 1) {
+  } else if (sscanf(url, "http://%99[^\n]", host) == 1) {
     strcpy(path, "");
   } else {
-    free(urlCopy);
     return ERROR;
   }
 

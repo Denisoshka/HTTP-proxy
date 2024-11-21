@@ -2,14 +2,13 @@
 
 #include <assert.h>
 
-#include "../log.h"
+#include "../utils/log.h"
 
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <bits/pthreadtypes.h>
 #include <sys/time.h>
 

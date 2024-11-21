@@ -2,10 +2,15 @@
 #define PROXY_H
 
 #include <pthread.h>
+#include <stdio.h>
 
 #include "../cache/cache.h"
+
 #define CACHE_SIZE_LIMIT 1048576 //1Mb
-//Should be >= 16kB to fully fit HTTP headers in single buffer
+
+/**
+ *Should be >= 16kB to fully fit HTTP headers in single buffer
+ */
 #define BUFFER_SIZE      16384  //16kB 
 
 
@@ -16,13 +21,14 @@ typedef struct ClientContextArgs {
   int            clientSocket;
 } ClientContextArgsT;
 
+ssize_t readHttpHeaders(int client_socket, char *buffer, size_t buffer_size);
 
-//request_handler.c funcs
+int parseURL(const char *url, char *host, char *path, int *port);
+
 void handleRequest(int clientSocket);
 
 void *downloadData(void *args);
 
-//server.c funcs
 void startServer(int port);
 
 #endif //PROXY_H
