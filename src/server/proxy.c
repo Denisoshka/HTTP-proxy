@@ -1,29 +1,26 @@
 #include <errno.h>
 
 #include "proxy.h"
-#include "log.h"
+#include "../utils/log.h"
 
-#include <bits/pthreadtypes.h>
-#include <netinet/in.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/socket.h>
-#include <time.h>
-#include <unistd.h>
-#include <arpa/inet.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <bits/pthreadtypes.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+
+#include "../cache/cache.h"
 
 #define SERVER_BACKLOG 10
 
-typedef struct {
-  int clientSocket;
-} ClientThreadRoutineArgs;
-
 void setupSigPipeIgnore(void) {
   struct sigaction sa;
-  sa.sa_handler = SIG_IGN; // Устанавливаем обработчик для SIGPIPE
+  sa.sa_handler = SIG_IGN;
   sa.sa_flags = 0;
   sigemptyset(&sa.sa_mask);
   sigaction(SIGPIPE, &sa, NULL);
@@ -73,24 +70,27 @@ void *clientThreadRoutine(void *args) {
 
 void startServer(const int port) {
   setupSigPipeIgnore();
-
-  struct sockaddr_in serverAddr, clientAddr;
+  struct sockaddr_in serverAddr;
+  struct sockaddr_in clientAddr;
   socklen_t          clientAddrLen = sizeof(clientAddr);
 
   int serverSocket = setupServerSocket(&serverAddr, port);
-  int ret = bind(serverSocket, (struct sockaddr *) &serverAddr, sizeof
-                 (serverAddr));
+  int ret = bind(
+    serverSocket, (struct sockaddr *) &serverAddr, sizeof(serverAddr)
+  );
   if (ret < 0) {
+    logError("server bind failed %s", strerror(errno));
     perror("bind failed");
     abort();
   }
+
   ret = listen(serverSocket, SERVER_BACKLOG);
   if (ret < 0) {
-    perror("Listen error");
+    logError("[startServer] %s", strerror(errno));
     abort();
   }
+  CacheManagerT *cacheManager = CacheManagerT_new();
   logInfo("proxy start on %d port", port);
-
   logInfo("wait connections");
 
   while (1) {
@@ -101,7 +101,7 @@ void startServer(const int port) {
     inet_ntop(AF_INET, &clientAddr.sin_addr.s_addr, addrBuf, clientAddrLen);
 
     if (clientSocket < 0) {
-      logInfo("error while accepting connection: %s ", strerror(errno));
+      logError("error while accepting connection: %s ", strerror(errno));
       continue;
     }
     logInfo(

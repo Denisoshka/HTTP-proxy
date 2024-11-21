@@ -24,19 +24,20 @@ enum CacheEvents {
 struct CacheEntry {
   char              url[URL_MAX_LENGTH];
   struct timeval    lastUpdate;
-  size_t            Threshold;
   CacheEntryChunkT *data;
   CacheEntryChunkT *lastChunk;
   volatile size_t   downloadedSize;
   volatile int      downloadFinished;
+  volatile int      status;
   pthread_mutex_t   dataMutex;
   pthread_cond_t    dataCond;
 };
 
 struct CacheEntryChunk {
-  size_t       chunkSize;
-  CacheEntryT *next;
-  char *       data;
+  size_t                  cutDataSize;
+  size_t                  totalDataSize;
+  struct CacheEntryChunk *next;
+  char *                  data;
 };
 
 struct CacheNode {
@@ -46,18 +47,33 @@ struct CacheNode {
 };
 
 struct CacheManager {
-  size_t curCacheSize;
-  size_t cacheSizeLimit;
+  double entryThreshold;
 
   pthread_mutex_t entriesMutex;
   CacheNodeT *    nodes;
 };
 
+void CacheNodeT_delete(const CacheNodeT *node);
+
+
+void CacheEntryT_delete(CacheEntryT *entry);
+
+void CacheEntryT_append_CacheEntryChunkT(
+  CacheEntryT *entry, CacheEntryChunkT *chunk, int isLast
+);
+
+
+CacheManagerT *CacheManagerT_new();
+
 CacheNodeT *CacheManagerT_acquire_CacheNodeT(
   const CacheManagerT *cache, const char *url
 );
 
-void CacheNodeT_delete(CacheNodeT *node);
+void CacheManagerT_release_CacheNodeT(
+  const CacheManagerT *cache, CacheNodeT *node
+);
+
+void CacheManagerT_checkAndRemoveExpired_CacheNodeT(CacheManagerT *manager);
 
 #undef URL_MAX_LENGTH
 #endif

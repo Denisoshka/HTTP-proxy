@@ -2,6 +2,8 @@
 #define PROXY_H
 
 #include <pthread.h>
+
+#include "../cache/cache.h"
 #define CACHE_SIZE_LIMIT 1048576 //1Mb
 //Should be >= 16kB to fully fit HTTP headers in single buffer
 #define BUFFER_SIZE      16384  //16kB 
@@ -9,25 +11,11 @@
 
 static const size_t kDefaultChunkSize = (1024 * 1024);
 
-enum CacheStatus {
-  Success,
-  NotFound,
-  Error,
-};
+typedef struct ClientContextArgs {
+  CacheManagerT *cacheManager;
+  int            clientSocket;
+} ClientContextArgsT;
 
-
-//cache.c funcs
-CacheEntryT *getOrCreateCacheEntry(const char *url);
-
-void deleteEntry(CacheEntryT *entry);
-
-void cacheCleanup(void);
-
-void cacheInsertData(CacheEntryT *entry, const char *data, size_t length);
-
-void cacheMarkComplete(CacheEntryT *entry);
-
-void cacheMarkOk(CacheEntryT *entry, int val);
 
 //request_handler.c funcs
 void handleRequest(int clientSocket);

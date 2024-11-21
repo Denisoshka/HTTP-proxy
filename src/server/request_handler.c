@@ -1,15 +1,14 @@
 #include <errno.h>
 
 #include "proxy.h"
-#include "log.h"
+#include "../utils/log.h"
 
+#include <netdb.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <unistd.h>
-#include <netdb.h>
 #include <arpa/inet.h>
 #include <asm-generic/errno-base.h>
 #include <sys/socket.h>
@@ -26,14 +25,14 @@ const char *unsupportedProtocolResponseMsg =
     "Content-Length: 40\r\n"
     "\r\n"
     "Only HTTP protocol is supported.\r\n";
-const ssize_t unsupportedProtocolResponseMsgLen = strlen(response);
+const ssize_t unsupportedProtocolResponseMsgLen = strlen(unsupportedProtocolResponseMsg);
 
 void sendUnsupportedProtocolResponse(int client_socket) {
   ssize_t sended = 0;
   while (sended < unsupportedProtocolResponseMsgLen) {
     ssize_t ret = send(client_socket, unsupportedProtocolResponseMsg,
                        unsupportedProtocolResponseMsgLen, 0);
-    if (ret < 0) {break;}
+    if (ret < 0) { break; }
     sended += ret;
   }
 }

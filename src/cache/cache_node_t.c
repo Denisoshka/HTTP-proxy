@@ -12,7 +12,7 @@ CacheNodeT *CacheNodeT_new(const size_t dataSize) {
   return tmp;
 }
 
-void CacheNodeT_delete(CacheNodeT *node) {
+void CacheNodeT_delete(const CacheNodeT *node) {
   if (node == NULL) return;
-
+  CacheEntryT_delete(node->entry);
 }

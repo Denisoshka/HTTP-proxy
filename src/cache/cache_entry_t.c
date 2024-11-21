@@ -51,3 +51,8 @@ destroyAtMalloc:
   tmp = NULL;
   return tmp;
 }
+
+void CacheEntryT_delete(CacheEntryT *entry) {
+  if (entry == NULL) return;
+
+}

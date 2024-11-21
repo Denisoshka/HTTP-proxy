@@ -8,7 +8,18 @@ CacheEntryChunkT *CacheEntryChunk_new(const size_t dataSize) {
   if (tmp == NULL) {
     return NULL;
   }
-  tmp->chunkSize = dataSize;
+  tmp->totalDataSize = dataSize;
   tmp->next = NULL;
   return tmp;
+}
+
+void CacheEntryChunk_delete(CacheEntryChunkT *chunk) {
+  if (chunk == NULL) return;
+  for (CacheEntryChunkT *cur = chunk; cur != NULL;) {
+    CacheEntryChunkT *todel = cur;
+    cur = cur->next;
+
+    free(todel->data);
+    free(todel);
+  }
 }
