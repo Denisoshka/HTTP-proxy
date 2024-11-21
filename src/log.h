@@ -1,5 +1,5 @@
-#ifndef CACHE_PROXY_LOG_H
-#define CACHE_PROXY_LOG_H
+#ifndef PROXY_LOG_H
+#define PROXY_LOG_H
 
 #define LOG_ALL_TEXT     "ALL"
 #define LOG_TRACE_TEXT   "TRACE"
@@ -22,11 +22,17 @@
 #define LOG_LEVEL_DEFAULT LOG_INFO_LEVEL
 
 void logSetLevel(int log_level);
-void logTrace(const char* format, ...);
-void logDebug(const char* format, ...);
-void logInfo(const char* format, ...);
-void logWarning(const char* format, ...);
-void logError(const char* format, ...);
-void logFatal(const char* format, ...);
 
-#endif // CACHE_PROXY_LOG_H
+void logTrace(const char *format, ...);
+
+void logDebug(const char *format, ...);
+
+void logInfo(const char *format, ...);
+
+void logWarning(const char *format, ...);
+
+void logError(const char *format, ...);
+
+void logFatal(const char *format, ...);
+
+#endif

@@ -13,7 +13,6 @@ int main(int argc, char **argv) {
     return ERROR;
   }
 
-  // Преобразуем строку аргумента в число (номер порта)
 	const int port = atoi(argv[1]);
   if (port <= 0 || port > 65535) {
     fprintf(stderr, "Invalid port number: %s\n", argv[1]);
