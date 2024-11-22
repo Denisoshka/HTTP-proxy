@@ -23,6 +23,8 @@ typedef struct ClientContextArgs {
 
 ssize_t readHttpHeaders(int client_socket, char *buffer, size_t buffer_size);
 
+ssize_t sendN(const int socket, const void *buffer, const size_t size)
+
 int parseURL(const char *url, char *host, char *path, int *port);
 
 void handleRequest(int clientSocket);

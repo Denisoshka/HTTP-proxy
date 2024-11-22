@@ -17,18 +17,15 @@ typedef struct CacheNode       CacheNodeT;
 typedef struct CacheManager    CacheManagerT;
 typedef struct CacheEntryChunk CacheEntryChunkT;
 
-enum CacheEvents {
-  RequireToCleanCash
-};
-
 struct CacheEntry {
-  char              url[URL_MAX_LENGTH];
+  char *            url;
   struct timeval    lastUpdate;
-  CacheEntryChunkT *data;
+  CacheEntryChunkT *dataChunks;
   CacheEntryChunkT *lastChunk;
   volatile size_t   downloadedSize;
   volatile int      downloadFinished;
   volatile int      status;
+  volatile int      usersQ;
   pthread_mutex_t   dataMutex;
   pthread_cond_t    dataCond;
 };
@@ -43,7 +40,6 @@ struct CacheEntryChunk {
 struct CacheNode {
   CacheEntryT *     entry;
   struct CacheNode *next;
-  volatile int      usersQ;
 };
 
 struct CacheManager {
@@ -53,10 +49,18 @@ struct CacheManager {
   CacheNodeT *    nodes;
 };
 
+
+CacheNodeT *CacheNodeT_new();
+
 void CacheNodeT_delete(const CacheNodeT *node);
 
+CacheEntryT *CacheEntryT_new();
+
+void CacheEntryT_acquire(CacheEntryT *entry);
 
 void CacheEntryT_delete(CacheEntryT *entry);
+
+void CacheEntryT_release(CacheEntryT *entry);
 
 void CacheEntryT_append_CacheEntryChunkT(
   CacheEntryT *entry, CacheEntryChunkT *chunk, int isLast
@@ -65,13 +69,11 @@ void CacheEntryT_append_CacheEntryChunkT(
 
 CacheManagerT *CacheManagerT_new();
 
-CacheNodeT *CacheManagerT_acquire_CacheNodeT(
+CacheNodeT *CacheManagerT_get_CacheNodeT(
   const CacheManagerT *cache, const char *url
 );
 
-void CacheManagerT_release_CacheNodeT(
-  const CacheManagerT *cache, CacheNodeT *node
-);
+CacheNodeT *CacheNodeT_createFor_CacheManagerT();
 
 void CacheManagerT_checkAndRemoveExpired_CacheNodeT(CacheManagerT *manager);
 

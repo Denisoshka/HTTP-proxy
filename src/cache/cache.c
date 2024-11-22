@@ -58,63 +58,25 @@ CacheManagerT *CacheManagerT_new() {
   return tmp;
 }
 
-CacheNodeT *CacheManagerT_acquire_CacheNodeT(const CacheManagerT *cache,
-                                             const char *         url) {
+/**
+ * use under `CacheManagerT->entriesMutex`
+ * @param cache
+ * @param url cache url
+ * @return `CacheNodeT *` if contains else `null`
+ */
+CacheNodeT *CacheManagerT_get_CacheNodeT(
+  const CacheManagerT *cache, const char *url
+) {
   for (
     CacheNodeT *node = cache->nodes;
     node != NULL;
     node = node->next
   ) {
     if (strcmp(node->entry->url, url) == 0) {
-      int ret = pthread_mutex_lock(&node->entry->dataMutex);
-      if (ret != 0) {
-        logFatal(
-          "[CacheManagerT_acquire_CacheNodeT] pthread_mutex_init failed %s",
-          strerror(errno)
-        );
-        abort();
-      }
-
-      node->usersQ++;
-      gettimeofday(&node->entry->lastUpdate, NULL);
-
-      ret = pthread_mutex_unlock(&node->entry->dataMutex);
-      if (ret != 0) {
-        logFatal(
-          "[CacheManagerT_acquire_CacheNodeT] pthread_mutex_init failed %s",
-          strerror(errno)
-        );
-        abort();
-      }
       return node;
     }
   }
   return NULL;
-}
-
-void CacheManagerT_release_CacheNodeT(
-  const CacheManagerT *cache, CacheNodeT *node
-) {
-  int ret = pthread_mutex_lock(&node->entry->dataMutex);
-  if (ret != 0) {
-    logFatal(
-      "[CacheManagerT_acquire_CacheNodeT] pthread_mutex_lock failed %s",
-      strerror(errno)
-    );
-    abort();
-  }
-
-  node->usersQ--;
-  gettimeofday(&node->entry->lastUpdate, NULL);
-
-  ret = pthread_mutex_unlock(&node->entry->dataMutex);
-  if (ret != 0) {
-    logFatal(
-      "[CacheManagerT_acquire_CacheNodeT] pthread_mutex_unlock failed %s",
-      strerror(errno)
-    );
-    abort();
-  }
 }
 
 void CacheEntryT_append_CacheEntryChunkT(
@@ -129,9 +91,9 @@ void CacheEntryT_append_CacheEntryChunkT(
     abort();
   }
 
-  if (entry->data == NULL) {
+  if (entry->dataChunks == NULL) {
     entry->lastChunk = chunk;
-    entry->data = chunk;
+    entry->dataChunks = chunk;
   }
 
   entry->lastChunk->next = chunk;
@@ -176,16 +138,17 @@ void CacheManagerT_checkAndRemoveExpired_CacheNodeT(CacheManagerT *manager) {
 
   for (CacheNodeT **current = &manager->nodes; (*current) != NULL;) {
     CacheNodeT *node = *current;
-    ret = pthread_mutex_lock(&node->entry->dataMutex);
+    ret = pthread_mutex_trylock(&node->entry->dataMutex);
+    if (ret == EBUSY) continue;
     if (ret != 0) {
       logFatal(
-        "[CacheManagerT_checkAndRemoveExpired_CacheNodeT] pthread_mutex_lock : %s",
+        "[CacheManagerT_checkAndRemoveExpired_CacheNodeT] pthread_mutex_trylock : %s",
         strerror(errno)
       );
       abort();
     }
     if (!isCacheNodeValid(manager, node->entry, checkStart)
-        && node->usersQ == 0) {
+        && node->entry->usersQ == 0) {
       *current = node->next;
       CacheNodeT_delete(node);
     } else {
@@ -208,4 +171,32 @@ void CacheManagerT_checkAndRemoveExpired_CacheNodeT(CacheManagerT *manager) {
     );
     abort();
   }
+}
+
+CacheNodeT *CacheNodeT_createFor_CacheManagerT(const char *url) {
+  CacheNodeT *node = CacheNodeT_new();
+  if (node == NULL) {
+    logError(
+      "[handleConnection] CacheNodeT_new failed : %s", strerror(errno)
+    );
+    return NULL;
+  }
+  node->entry = CacheEntryT_new();
+  if (node->entry == NULL) {
+    logError(
+      "[handleConnection] CacheEntryT_new failed : %s", strerror(errno)
+    );
+    CacheNodeT_delete(node);
+    return NULL;
+  }
+  node->entry->url = strdup(url);
+  if (node->entry->url == NULL) {
+    logError(
+      "[handleConnection] strdup failed : %s", strerror(errno)
+    );
+    CacheEntryT_delete(node->entry);
+    CacheNodeT_delete(node);
+    return NULL;
+  }
+  return node;
 }

@@ -56,16 +56,16 @@ int parseURL(const char *url, char *host, char *path, int *port) {
   return SUCCESS;
 }
 
-ssize_t send_all(int socket, const void *buffer, size_t length) {
-  size_t  total_sent = 0;
-  ssize_t bytes_sent;
-  while (total_sent < length) {
-    bytes_sent = send(socket, buffer + total_sent, length - total_sent, 0);
-    if (bytes_sent == -1) {
-      perror("send failed");
-      return -1; // Ошибка отправки
+ssize_t sendN(const int socket, const void *buffer, const size_t size) {
+  size_t totalSent = 0;
+  while (totalSent < size) {
+    const ssize_t bytesSent = send(
+      socket, buffer + totalSent, size - totalSent, 0
+    );
+    if (bytesSent < 0) {
+      return -1;
     }
-    total_sent += bytes_sent;
+    totalSent += bytesSent;
   }
-  return total_sent;
+  return totalSent;
 }

@@ -231,7 +231,7 @@ void handleRequest(int clientSocket) {
     while (sentBytes < entry->downloadedSize) {
       const size_t chunk = send(
         clientSocket,
-        entry->data + sentBytes,
+        entry->dataChunks + sentBytes,
         entry->downloadedSize - sentBytes,
         0
       );

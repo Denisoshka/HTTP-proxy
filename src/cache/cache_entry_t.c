@@ -4,14 +4,15 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
-CacheEntryT *CacheEntryT_new(const size_t cacheSizeLimit) {
+CacheEntryT *CacheEntryT_new() {
   CacheEntryT *tmp = malloc(sizeof(*tmp));
   if (tmp == NULL) {
     return NULL;
   }
 
-  tmp->data = NULL;
+  tmp->dataChunks = NULL;
   tmp->lastChunk = NULL;
   tmp->downloadedSize = 0;
   tmp->downloadFinished = 0;
@@ -52,7 +53,56 @@ destroyAtMalloc:
   return tmp;
 }
 
+void CacheEntryT_release(CacheEntryT *entry) {
+  int ret = pthread_mutex_lock(&entry->dataMutex);
+  if (ret != 0) {
+    logFatal(
+      "[CacheManagerT_acquire_CacheNodeT] pthread_mutex_lock failed %s",
+      strerror(errno)
+    );
+    abort();
+  }
+
+  entry->usersQ--;
+  gettimeofday(&entry->lastUpdate, NULL);
+
+  ret = pthread_mutex_unlock(&entry->dataMutex);
+  if (ret != 0) {
+    logFatal(
+      "[CacheManagerT_acquire_CacheNodeT] pthread_mutex_unlock failed %s",
+      strerror(errno)
+    );
+    abort();
+  }
+}
+
+void CacheEntryT_acquire(CacheEntryT *entry) {
+  int ret = pthread_mutex_lock(&entry->dataMutex);
+  if (ret != 0) {
+    logFatal(
+      "[CacheManagerT_get_CacheNodeT] pthread_mutex_lock failed %s",
+      strerror(errno)
+    );
+    abort();
+  }
+
+  entry->usersQ++;
+  gettimeofday(&entry->lastUpdate, NULL);
+
+  ret = pthread_mutex_unlock(&entry->dataMutex);
+  if (ret != 0) {
+    logFatal(
+      "[CacheManagerT_get_CacheNodeT] pthread_mutex_unlock failed %s",
+      strerror(errno)
+    );
+    abort();
+  }
+}
+
+
 void CacheEntryT_delete(CacheEntryT *entry) {
   if (entry == NULL) return;
 
 }
+
+

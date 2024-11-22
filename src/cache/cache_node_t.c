@@ -1,9 +1,12 @@
 #include "cache.h"
+#include "../utils/log.h"
 
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
-CacheNodeT *CacheNodeT_new(const size_t dataSize) {
+CacheNodeT *CacheNodeT_new() {
   CacheNodeT *tmp = malloc(sizeof(*tmp));
   if (tmp == NULL) {
     return NULL;
