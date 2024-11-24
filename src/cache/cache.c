@@ -79,9 +79,31 @@ CacheNodeT *CacheManagerT_get_CacheNodeT(
   return NULL;
 }
 
+void CacheManagerT_put_CacheNodeT(CacheManagerT *cache, CacheNodeT *node) {
+  if (node == NULL) return;
+  int ret = pthread_mutex_lock(&cache->entriesMutex);
+  if (ret != 0) {
+    logFatal("[CacheManagerT] pthread_mutex_lock failed %s", strerror(errno));
+    abort();
+  }
+  if (cache->nodes == NULL) {
+    cache->nodes = node;
+    cache->lastNode = node;
+  } else {
+    cache->lastNode->next = node;
+    cache->lastNode = node;
+  }
+  ret = pthread_mutex_unlock(&cache->entriesMutex);
+  if (ret != 0) {
+    logFatal("[CacheManagerT] pthread_mutex_unlock failed %s", strerror(errno));
+    abort();
+  }
+}
+
 void CacheEntryT_append_CacheEntryChunkT(
   CacheEntryT *entry, CacheEntryChunkT *chunk, const int isLast
 ) {
+  if (chunk == NULL) return;
   int ret = pthread_mutex_lock(&entry->dataMutex);
   if (ret != 0) {
     logFatal(
@@ -97,12 +119,8 @@ void CacheEntryT_append_CacheEntryChunkT(
   }
 
   entry->lastChunk->next = chunk;
-  entry->downloadedSize += chunk->totalDataSize;
+  entry->downloadedSize += chunk->maxDataSize;
   gettimeofday(&entry->lastUpdate, NULL);
-
-  assert(entry->downloadFinished && isLast);
-
-  entry->downloadFinished = isLast;
 
   ret = pthread_cond_broadcast(&entry->dataCond);
   if (ret != 0) {
@@ -173,30 +191,21 @@ void CacheManagerT_checkAndRemoveExpired_CacheNodeT(CacheManagerT *manager) {
   }
 }
 
-CacheNodeT *CacheNodeT_createFor_CacheManagerT(const char *url) {
-  CacheNodeT *node = CacheNodeT_new();
-  if (node == NULL) {
-    logError(
-      "[handleConnection] CacheNodeT_new failed : %s", strerror(errno)
-    );
-    return NULL;
-  }
-  node->entry = CacheEntryT_new();
-  if (node->entry == NULL) {
+CacheEntryT *CacheEntryT_new_withUrl(const char *url) {
+  CacheEntryT *entry = CacheEntryT_new();
+  if (entry == NULL) {
     logError(
       "[handleConnection] CacheEntryT_new failed : %s", strerror(errno)
     );
-    CacheNodeT_delete(node);
     return NULL;
   }
-  node->entry->url = strdup(url);
-  if (node->entry->url == NULL) {
+  entry->url = strdup(url);
+  if (entry->url == NULL) {
     logError(
       "[handleConnection] strdup failed : %s", strerror(errno)
     );
-    CacheEntryT_delete(node->entry);
-    CacheNodeT_delete(node);
+    CacheEntryT_delete(entry);
     return NULL;
   }
-  return node;
+  return entry;
 }

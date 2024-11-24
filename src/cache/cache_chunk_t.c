@@ -3,23 +3,20 @@
 #include <stdlib.h>
 
 
-CacheEntryChunkT *CacheEntryChunk_new(const size_t dataSize) {
+CacheEntryChunkT *CacheEntryChunkT_new(const size_t dataSize) {
   CacheEntryChunkT *tmp = malloc(sizeof(*tmp));
   if (tmp == NULL) {
     return NULL;
   }
-  tmp->totalDataSize = dataSize;
+  tmp->maxDataSize = dataSize;
+  tmp->curDataSize = 0;
   tmp->next = NULL;
   return tmp;
 }
 
-void CacheEntryChunk_delete(CacheEntryChunkT *chunk) {
+void CacheEntryChunkT_delete(CacheEntryChunkT *chunk) {
   if (chunk == NULL) return;
-  for (CacheEntryChunkT *cur = chunk; cur != NULL;) {
-    CacheEntryChunkT *todel = cur;
-    cur = cur->next;
 
-    free(todel->data);
-    free(todel);
-  }
+  free(chunk->data);
+  free(chunk);
 }

@@ -1,10 +1,14 @@
+#include <errno.h>
+#include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <sys/socket.h>
 
 #include "../utils/log.h"
 
+#define BUFFER_SIZE 4096
 #define DEF_HTTP_PORT 80
 #define ERROR (-1)
 #define SUCCESS 0
@@ -31,6 +35,7 @@ ssize_t readHttpHeaders(const int    client_socket,
   }
   return -1;
 }
+
 
 int parseURL(const char *url, char *host, char *path, int *port) {
   *port = DEF_HTTP_PORT;
@@ -68,4 +73,85 @@ ssize_t sendN(const int socket, const void *buffer, const size_t size) {
     totalSent += bytesSent;
   }
   return totalSent;
+}
+
+ssize_t recvN(const int socket, void *buffer, const size_t size) {
+  size_t totalReceived = 0;
+  while (totalReceived < size) {
+    const ssize_t bytesReceived = recv(
+      socket, buffer + totalReceived, size - totalReceived, 0
+    );
+    if (bytesReceived < 0) {
+      return ERROR;
+    }
+    totalReceived += bytesReceived;
+  }
+  return totalReceived;
+}
+
+void sendError(const int sock, const char *status, const char *message) {
+  constexpr size_t contentLenReserve = 20;
+  const char *     responseTemplate = "HTTP/1.1 %s\r\n"
+      "C ontent-Type: text/plain\r\n"
+      "Content-Length: %zu\r\n"
+      "\r\n"
+      "%s";
+  const size_t responseLength = strlen(responseTemplate)
+                                + strlen(message)
+                                + strlen(status)
+                                + contentLenReserve;
+  char *response = malloc(responseLength * sizeof(*response));
+  snprintf(
+    response,
+    sizeof(response),
+    responseTemplate,
+    status,
+    strlen(message),
+    message
+  );
+  sendN(sock, response, strlen(response));
+  free(response);
+}
+
+/**
+ * @param host destination server host
+ * @param port destination server port
+ * @return server socket
+ */
+int getSocketOfRemote(const char *host, const int port) {
+  const struct hostent *server = gethostbyname(host);
+  if (server == NULL) {
+    logError("%s : %d gethostbyname %s", __FILE__, __LINE__, strerror(errno));
+    return ERROR;
+  }
+
+  int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+  if (serverSocket < 0) {
+    logError(
+      "%s : %d failed to create server socket %s",
+      __FILE__, __LINE__, strerror(errno)
+    );
+    return ERROR;
+  }
+
+  struct sockaddr_in server_addr = {0};
+  server_addr.sin_family = AF_INET;
+  server_addr.sin_port = htons(port);
+  memcpy(&server_addr.sin_addr.s_addr, server->h_addr, server->h_length);
+  const int ret = connect(
+    serverSocket, (struct sockaddr *) &server_addr, sizeof(server_addr)
+  );
+  if (ret < 0) {
+    logError(
+      "%s : %d failed to connect server : %s port : %d, error %s",
+      __FILE__, __LINE__, host, port, strerror(errno)
+    );
+    goto destroySocket;
+  }
+
+  return serverSocket;
+
+destroySocket:
+  close(serverSocket);
+  return ERROR;
 }

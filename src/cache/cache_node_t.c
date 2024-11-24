@@ -15,7 +15,6 @@ CacheNodeT *CacheNodeT_new() {
   return tmp;
 }
 
-void CacheNodeT_delete(const CacheNodeT *node) {
-  if (node == NULL) return;
-  CacheEntryT_delete(node->entry);
+void CacheNodeT_delete(CacheNodeT *node) {
+  free(node);
 }

@@ -16,123 +16,152 @@
 #define METHOD_MAX_LEN 16
 #define URL_MAX_LEN 2048
 #define PROTOCOL_MAX_LEN 16
-#define HOST_MAX_LEN 1024
-#define PATH_MAX_LEN 2048
-const char *badRequestResponse =
-    "HTTP/1.1 400 Bad Request\r\n"
-    "Content-Type: text/plain\r\n"
-    "Content-Length: 15\r\n"
-    "\r\n"
-    "Invalid URL.\r\n";
-const int badRequestResponseLen = sizeof(badRequestResponse);
 
 int getSocketOfRemote(const char *host, int port);
 
-void handleConnection(ClientContextArgsT *args) {
+void handleConnection(
+  CacheManagerT *cacheManager, BufferT *buffer, int clientSocket
+);
+
+static int needCoCashing(const char *mehtod) {
+  if (strcmp(mehtod, "GET") == 0) return 1;
+  return 0;
+}
+
+void handleConnectionStartUp(void *args) {
+  ClientContextArgsT *contextArgs = args;
+  BufferT *           buffer = BufferT_new(BUFFER_SIZE);
+  const int           clientSocket = contextArgs->clientSocket;
+  CacheManagerT *     cacheManager = contextArgs->cacheManager;
+
+  if (buffer == NULL) {
+    logError("%s:%d failed to allocate buffer",
+             __FILE__, __LINE__, strerror(errno));
+    sendError(clientSocket, InternalErrorStatus, "");
+    goto destroyContext;
+  }
+  handleConnection(cacheManager, buffer, clientSocket);
+destroyContext:
+  BufferT_delete(buffer);
+  free(contextArgs);
+}
+
+void handleConnection(CacheManagerT *cacheManager,
+                      BufferT *      buffer,
+                      const int      clientSocket
+) {
   char protocol[PROTOCOL_MAX_LEN];
   char method[METHOD_MAX_LEN];
-  char buffer[BUFFER_SIZE];
-  char host[HOST_MAX_LEN] = {0};
-  char path[PATH_MAX_LEN] = {0};
-  char url[URL_MAX_LEN];
-
   struct sockaddr_in server_addr;
-
-  const int      clientSocket = args->clientSocket;
-  CacheManagerT *cacheManager = args->cacheManager;
-
-  const int bytesRead = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
+  const int bytesRead = recvN(clientSocket, buffer, buffer->maxSize - 1);
   if (bytesRead <= 0) {
-    logError("failed to read request %s", strerror(errno));
-    perror("Failed to read from client");
-    close(clientSocket);
-    return;
+    logError("%s:%d failed to read request %s",
+             __FILE__, __LINE__, strerror(errno));
+    goto notifyInternalError;
   }
 
-  buffer[bytesRead] = '\0';
-  sscanf(buffer, "%s %s %s", method, url, protocol);
-  if (strcmp(method, "GET") == 0) {
-    int ret = pthread_mutex_lock(&cacheManager->entriesMutex);
+  buffer->occupancy = bytesRead;
+  buffer->data[bytesRead] = '\0';
+  char *url = malloc(URL_MAX_LEN * sizeof(*url));
+  char *host = malloc(URL_MAX_LEN * sizeof(*host));
+  char *path = malloc(URL_MAX_LEN * sizeof(*path));
+  if (url == NULL || host == NULL || path == NULL) {
+    logError("%s:%d failed to allocate memory",
+             __FILE__, __LINE__,errno(errno));
+    goto notifyInternalError;
+  }
+
+  int port;
+  int ret = parseURL(url, host, path, &port);
+  if (ret != SUCCESS) {
+    logError("%s, %d failed to parse URL %s",__FILE__, __LINE__, url);
+    sendError(clientSocket, BadRequestStatus, InvalidRequestMessage);
+    goto destroyContext;
+  }
+
+
+  sscanf(buffer->data, "%s %s %s", method, url, protocol);
+  if (needCoCashing(method)) {
+    ret = pthread_mutex_lock(&cacheManager->entriesMutex);
     if (ret != 0) {
-      logFatal("[handleConnection] pthread_mutex_lock %s", strerror(errno));
+      logFatal("%s:%d pthread_mutex_lock %s",
+               __FILE__, __LINE__, strerror(errno));
       abort();
     }
 
     CacheNodeT *node = CacheManagerT_get_CacheNodeT(cacheManager, url);
     if (node == NULL) {
-      node = CacheNodeT_createFor_CacheManagerT(url);
-      if (node == NULL) {
-        goto closeClientSocket;
-        //todo
+      CacheEntryT *entry = CacheEntryT_new();
+      if (entry == NULL) {
+        logError("%s:%d CacheEntryT_new %s",__FILE__,__LINE__, strerror(errno));
+        ret = pthread_mutex_unlock(&cacheManager->entriesMutex);
+        if (ret != 0) {
+          logFatal("%s:%d pthread_mutex_unlock %s",
+                   __FILE__, __LINE__, strerror(errno));
+          abort();
+        }
       }
 
-      node->entry->
+      entry->url = strdup(url);
+      if (entry->url == NULL) {
+        logError("%s:%d strdup %s",__FILE__,__LINE__, strerror(errno));
+        pthread_mutex_unlock(&cacheManager->entriesMutex);
+        CacheEntryT_delete(entry);
+        goto destroyContext;
+      }
+      ret = handleFileUpload(entry, clientSocket);
+      if (ret != 0) {
+        CacheEntryT_delete(entry);
+        goto destroyContext;
+      }
 
-
+      CacheEntryT_acquire(node->entry);
+      CacheManagerT_put_CacheNodeT(cacheManager, node);
+    } else {
+      CacheEntryT_acquire(node->entry);
     }
-    CacheEntryT_acquire(node->entry);
+
     if (node->entry->dataChunks == NULL) {
+      // ret = node->entry->
     } else {
     }
     ret = pthread_mutex_unlock(&cacheManager->entriesMutex);
     if (ret != 0) {
-      logFatal("[handleConnection] pthread_mutex_unlock %s", strerror(errno));
+      logFatal("%s : %d pthread_mutex_unlock %s",
+               __FILE__, __LINE__, strerror(errno)
+      );
       abort();
-    }
-
-
-    int port = 0;
-    ret = parseURL(url, host, path, &port);
-    if (ret != SUCCESS) {
-      logError("failed to parse URL %s", url);
-      sendN(clientSocket, badRequestResponse, badRequestResponseLen);
-      goto closeClientSocket;
-    }
-
-    const int remoteSocket = getSocketOfRemote(host, port);
-    if (remoteSocket < 0) {
-      goto closeClientSocket;
     }
   } else {
   }
 
+notifyInternalError:
+  sendError(clientSocket, InternalErrorStatus, "");
+  // goto destroyContext;
 
-closeClientSocket:
-  close(clientSocket);
+  /*notifyInvalidURL:
+    sendError(clientSocket, BadGatewayStatus, InvalidRequestMessage);*/
+destroyContext:
+  free(url);
+  free(host);
+  free(path);
 }
 
-/**
- * @param host destination server host
- * @param port destination server port
- * @return server socket
- */
-int getSocketOfRemote(const char *host, const int port) {
-  struct sockaddr_in    server_addr;
-  const struct hostent *server = gethostbyname(host);
-
-  int server_socket = socket(AF_INET, SOCK_STREAM, 0);
-  if (server_socket < 0) {
-    logError("failed to create server socket %s", strerror(errno));
-    return ERROR;
+BufferT *BufferT_new(const size_t maxOccupancy) {
+  BufferT *buffer = malloc(sizeof(*buffer));
+  if (buffer == NULL) {
+    return NULL;
   }
-
-  memset(&server_addr, 0, sizeof(server_addr));
-  server_addr.sin_family = AF_INET;
-  server_addr.sin_port = htons(port);
-  memcpy(&server_addr.sin_addr.s_addr, server->h_addr, server->h_length);
-  const int ret = connect(
-    server_socket, (struct sockaddr *) &server_addr, sizeof(server_addr)
-  );
-  if (ret < 0) {
-    logError("failed to connect server : %s port : %d, error %s",
-             host, port, strerror(errno)
-    );
-    goto destroySocket;
+  buffer->data = malloc(sizeof(*buffer->data) * maxOccupancy);
+  if (buffer->data == NULL) {
+    free(buffer);
+    return NULL;
   }
+  return buffer;
+}
 
-  return SUCCESS;
-
-destroySocket:
-  close(server_socket);
-  return ERROR;
+void BufferT_delete(BufferT *buffer) {
+  if (buffer == NULL) return;
+  free(buffer->data);
+  free(buffer);
 }
