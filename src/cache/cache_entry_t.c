@@ -102,16 +102,19 @@ void CacheEntryT_acquire(CacheEntryT *entry) {
 void CacheEntryT_delete(CacheEntryT *entry) {
   if (entry == NULL) return;
   free(entry->url);
-  for (CacheEntryChunkT *cur = entry->dataChunks;
+  for (volatile CacheEntryChunkT *cur = entry->dataChunks;
        cur != NULL;) {
-    CacheEntryChunkT *tmp = cur;
+    volatile CacheEntryChunkT *tmp = cur;
     CacheEntryChunkT_delete(tmp);
     cur = cur->next;
   }
+  free(entry->url);
+  if (pthread_mutex_destroy(&entry->dataMutex) != 0) abort();
+  if (pthread_cond_destroy(&entry->dataCond) != 0)abort();
 }
 
 void CacheEntryT_updateStatus(CacheEntryT *               entry,
-                                const enum CacheEntryStatus status) {
+                              const enum CacheEntryStatus status) {
   if (entry == NULL) return;
   int ret = pthread_mutex_lock(&entry->dataMutex);
   if (ret != 0) {

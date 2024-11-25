@@ -47,15 +47,123 @@ destroyContext:
 }
 
 void waitFirstChunkData(CacheEntryT *cache) {
-  if (cache->dataChunks == NULL) {
+  if (cache->status != Failed && cache->dataChunks == NULL) {
     if (pthread_mutex_lock(&cache->dataMutex) != 0) { abort(); }
-    while (cache->dataChunks == NULL) {
+    while (cache->status != Failed && cache->dataChunks == NULL) {
       if (pthread_cond_wait(&cache->dataCond, &cache->dataMutex) != 0) {
         abort();
       }
     }
     if (pthread_mutex_unlock(&cache->dataMutex) != 0) { abort(); }
   }
+}
+
+CacheNodeT *startDataUpload(
+  CacheManagerT *cacheManager, const int clientSocket, const char *url
+) {
+  CacheNodeT * node = CacheNodeT_new();
+  CacheEntryT *entry = CacheEntryT_new();
+
+  if (entry == NULL) {
+    logError("%s:%d CacheEntryT_new %s",__FILE__,__LINE__, strerror(errno));
+    goto onFailure;
+  }
+  if (node == NULL) {
+    logError("%s:%d CacheNodeT_new %s",__FILE__,__LINE__, strerror(errno));
+    goto onFailure;
+  }
+
+  entry->url = strdup(url);
+  if (entry->url == NULL) {
+    logError("%s:%d strdup %s",__FILE__,__LINE__, strerror(errno));
+    goto onFailure;
+  }
+
+  const int ret = handleFileUpload(entry, clientSocket);
+  if (ret != SUCCESS) {
+    logError("%s:%d handleFileUpload %s",__FILE__,__LINE__, strerror(errno));
+    goto onFailure;
+  }
+
+  node->entry = entry;
+  CacheManagerT_put_CacheNodeT(cacheManager, node);
+  return node;
+
+onFailure:
+  CacheEntryT_delete(entry);
+  CacheNodeT_delete(node);
+  return NULL;
+}
+
+int sendFromCache(
+  CacheManagerT *cacheManager, const int clientSocket, const char *url) {
+  int ret = pthread_mutex_lock(&cacheManager->entriesMutex);
+  if (ret != 0) { abort(); }
+
+  CacheNodeT *node = CacheManagerT_get_CacheNodeT(cacheManager, url);
+  if (node == NULL) {
+    node = startDataUpload(cacheManager, clientSocket, url);
+    if (node == NULL) {
+      ret = pthread_mutex_unlock(&cacheManager->entriesMutex);
+      if (ret != 0) { abort(); }
+      return ERROR;
+    }
+  }
+
+  CacheEntryT_acquire(node->entry);
+  ret = pthread_mutex_unlock(&cacheManager->entriesMutex);
+  if (ret != 0) { abort(); }
+
+  CacheEntryT *cache = node->entry;
+
+  waitFirstChunkData(cache);
+
+  volatile CacheEntryChunkT *curChunk = cache->dataChunks;
+  int                        retVal = SUCCESS;
+  while (cache->status != Failed) {
+    const size_t writed = 0;
+    while (curChunk->next == NULL) {
+      size_t curMax = curChunk->curDataSize;
+      if (curMax - writed == 0) {
+        ret = pthread_mutex_lock(&cache->dataMutex);
+        if (ret != SUCCESS) { abort(); }
+        curMax = curChunk->curDataSize;
+        if (curMax - writed == 0) {
+          ret = pthread_cond_wait(&cache->dataCond, &cache->dataMutex);
+          if (ret != SUCCESS) {
+            abort();
+          }
+        }
+        ret = pthread_mutex_unlock(&cache->dataMutex);
+        if (ret != 0) { abort(); }
+      }
+      ret = sendN(clientSocket, curChunk->data + writed, curMax - writed);
+      if (ret != SUCCESS) {
+        logError("%s:%d sendN %s",
+                 __FILE__, __LINE__, strerror(errno));
+        retVal = ERROR;
+      }
+    }
+
+    const ssize_t sended = sendN(
+      clientSocket, curChunk->data + writed, curChunk->curDataSize - writed
+    );
+    if (sended == 0) {
+      break;
+    }
+    if (sended < 0) {
+      logError("%s:%d sendN %s",
+               __FILE__, __LINE__, strerror(errno));
+      retVal = ERROR;
+      break;
+    }
+
+    if (cache->status == Success && curChunk->next == NULL) {
+      break;
+    }
+    curChunk = curChunk->next;
+  }
+  CacheEntryT_release(cache);
 }
 
 void handleConnection(CacheManagerT *cacheManager,
@@ -94,69 +202,7 @@ void handleConnection(CacheManagerT *cacheManager,
 
   sscanf(buffer->data, "%s %s %s", method, url, protocol);
   if (ableForCashing(method)) {
-    ret = pthread_mutex_lock(&cacheManager->entriesMutex);
-    if (ret != 0) { abort(); }
-
-    CacheNodeT *node = CacheManagerT_get_CacheNodeT(cacheManager, url);
-    if (node == NULL) {
-      CacheEntryT *entry = CacheEntryT_new();
-      if (entry == NULL) {
-        logError("%s:%d CacheEntryT_new %s",__FILE__,__LINE__, strerror(errno));
-        ret = pthread_mutex_unlock(&cacheManager->entriesMutex);
-        if (ret != 0) { abort(); }
-        goto destroyContext;
-      }
-
-      entry->url = strdup(url);
-      if (entry->url == NULL) {
-        logError("%s:%d strdup %s",__FILE__,__LINE__, strerror(errno));
-        if (pthread_mutex_unlock(&cacheManager->entriesMutex) != 0) { abort(); }
-        CacheEntryT_delete(entry);
-        goto destroyContext;
-      }
-
-      ret = handleFileUpload(entry, clientSocket);
-      if (ret != SUCCESS) {
-        if (pthread_mutex_unlock(&cacheManager->entriesMutex) != 0) { abort(); }
-        CacheEntryT_delete(entry);
-        goto destroyContext;
-      }
-
-      CacheEntryT_acquire(node->entry);
-      CacheManagerT_put_CacheNodeT(cacheManager, node);
-    } else {
-      CacheEntryT_acquire(node->entry);
-    }
-    ret = pthread_mutex_unlock(&cacheManager->entriesMutex);
-    if (ret != 0) { abort(); }
-
-    CacheEntryT *cache = node->entry;
-
-    waitFirstChunkData(cache);
-
-    volatile CacheEntryChunkT *curChunk = cache->dataChunks;
-    while (cache->status == InProcess) {
-      size_t writed = 0;
-      while (curChunk->next == NULL) {
-        size_t curMax = curChunk->curDataSize;
-        if (curMax - writed == 0) {
-          ret = pthread_mutex_lock(&cache->dataMutex);
-          if (ret != 0) { abort(); }
-          curMax = curChunk->curDataSize;
-          if (curMax - writed == 0) {
-            ret = pthread_cond_wait(&cache->dataCond, &cache->dataMutex);
-            if (ret != 0) {
-              abort();
-            }
-          }
-          ret = pthread_mutex_unlock(&cache->dataMutex);
-          if (ret != 0) { abort(); }
-        }
-        ret = sendN(clientSocket, curChunk->data + writed, curMax - writed);
-        if (ret != SUCCESS) {
-        }
-      }
-    }
+    sendFromCache(cacheManager, clientSocket, url);
   } else {
   }
 
