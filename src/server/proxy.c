@@ -60,7 +60,8 @@ int setupServerSocket(struct sockaddr_in *serverAddr, const int port) {
 }
 
 void *clientThreadRoutine(void *args) {
-  int clientSocket = ((ClientThreadRoutineArgs *) args)->clientSocket;
+  ClientArgsT *cargs = args;
+  int          clientSocket = cargs->clientSocket;
 
   handleRequest(clientSocket);
   free(args);

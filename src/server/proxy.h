@@ -17,7 +17,11 @@
 #define HOST_MAX_LEN 1024
 #define PATH_MAX_LEN 2048
 
-static constexpr size_t kDefCacheChunkSize = 1024*1024;
+static constexpr size_t kDefCacheChunkSize = 1024 * 1024;
+
+typedef struct ClientArgs {
+  int clientSocket;
+} ClientArgsT;
 
 typedef struct Buffer {
   char *  data;

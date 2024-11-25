@@ -20,7 +20,7 @@ static CacheEntryChunkT *fillCache(CacheEntryChunkT *startChunk,
   while (added != buffer->occupancy) {
     const size_t dif = curChunk->maxDataSize - curChunk->curDataSize;
     if (dif == 0) {
-      CacheEntryT_append_CacheEntryChunkT(entry, curChunk, 0);
+      CacheEntryT_append_CacheEntryChunkT(entry, curChunk);
       curChunk = CacheEntryChunkT_new(kDefCacheChunkSize);
       if (curChunk == NULL) {
         return NULL;
@@ -36,7 +36,7 @@ static CacheEntryChunkT *fillCache(CacheEntryChunkT *startChunk,
   return curChunk;
 }
 
-static CacheEntryChunkT *readRestBytes(
+static CacheEntryChunkT *readSendRestBytes(
   const int    clientSocket,
   const int    remoteSocket,
   CacheEntryT *entry,
@@ -76,26 +76,23 @@ char *strstrn(const char * haystack,
               const size_t haystackLen,
               const char * needle,
               const size_t needleLen) {
-  // Если подстрока пуста, сразу возвращаем указатель на начало строки
   if (needleLen == 0) {
     return (char *) haystack;
   }
 
-  // Проходим по строке до максимальной длины
   for (size_t i = 0; i <= haystackLen - needleLen; i++) {
-    // Сравниваем текущий участок с подстрокой
     if (strncmp(&haystack[i], needle, needleLen) == 0) {
-      return (char *) &haystack[i]; // Подстрока найдена
+      return (char *) &haystack[i];
     }
   }
 
   return NULL; // Подстрока не найдена
 }
 
-int isStatusCode200(const char *response, ) {
+/*int isStatusCode200(const char *response, ) {
   return strstrn(response, "HTTP/1.1 200 OK", ) != NULL || strstr(
            response, "HTTP/1.0 200 OK") != NULL;
-}
+}*/
 
 void *fileUploaderStartup(void *args) {
   UploadArgsT *uploadArgs = args;
@@ -104,7 +101,7 @@ void *fileUploaderStartup(void *args) {
   const int    remoteSocket = uploadArgs->remoteSocket;
   const int    clientSocket = uploadArgs->clientSocket;
 
-  CacheEntryChunkT *curChunk = readRestBytes(
+  CacheEntryChunkT *curChunk = readSendRestBytes(
     clientSocket, remoteSocket, entry, buffer
   );
   if (curChunk == NULL) {

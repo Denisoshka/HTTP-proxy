@@ -101,7 +101,7 @@ void CacheManagerT_put_CacheNodeT(CacheManagerT *cache, CacheNodeT *node) {
 }
 
 void CacheEntryT_append_CacheEntryChunkT(
-  CacheEntryT *entry, CacheEntryChunkT *chunk, const int isLast
+  CacheEntryT *entry, CacheEntryChunkT *chunk
 ) {
   if (chunk == NULL) return;
   int ret = pthread_mutex_lock(&entry->dataMutex);
@@ -117,7 +117,7 @@ void CacheEntryT_append_CacheEntryChunkT(
     entry->lastChunk = chunk;
     entry->dataChunks = chunk;
   }
-
+  assert(entry->lastChunk->next == chunk);
   entry->lastChunk->next = chunk;
   entry->downloadedSize += chunk->maxDataSize;
   gettimeofday(&entry->lastUpdate, NULL);

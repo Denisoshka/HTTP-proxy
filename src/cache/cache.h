@@ -76,7 +76,7 @@ void CacheEntryChunkT_delete(CacheEntryChunkT *chunk);
 CacheEntryChunkT *CacheEntryChunkT_new(size_t dataSize);
 
 void CacheEntryT_append_CacheEntryChunkT(
-  CacheEntryT *entry, CacheEntryChunkT *chunk, int isLast
+  CacheEntryT *entry, CacheEntryChunkT *chunk
 );
 
 

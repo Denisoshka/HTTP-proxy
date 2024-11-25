@@ -46,15 +46,16 @@ destroyContext:
   free(contextArgs);
 }
 
-void waitFirstChunkData(CacheEntryT *cache) {
-  if (cache->status != Failed && cache->dataChunks == NULL) {
-    if (pthread_mutex_lock(&cache->dataMutex) != 0) { abort(); }
-    while (cache->status != Failed && cache->dataChunks == NULL) {
-      if (pthread_cond_wait(&cache->dataCond, &cache->dataMutex) != 0) {
+void waitFirstChunkData(CacheNodeT *cache) {
+  CacheEntryT *entry = cache->entry;
+  if (entry->status != Failed && entry->dataChunks == NULL) {
+    if (pthread_mutex_lock(&entry->dataMutex) != 0) { abort(); }
+    while (entry->status != Failed && entry->dataChunks == NULL) {
+      if (pthread_cond_wait(&entry->dataCond, &entry->dataMutex) != 0) {
         abort();
       }
     }
-    if (pthread_mutex_unlock(&cache->dataMutex) != 0) { abort(); }
+    if (pthread_mutex_unlock(&entry->dataMutex) != 0) { abort(); }
   }
 }
 
@@ -72,7 +73,6 @@ CacheNodeT *startDataUpload(
     logError("%s:%d CacheNodeT_new %s",__FILE__,__LINE__, strerror(errno));
     goto onFailure;
   }
-
   entry->url = strdup(url);
   if (entry->url == NULL) {
     logError("%s:%d strdup %s",__FILE__,__LINE__, strerror(errno));
@@ -95,54 +95,35 @@ onFailure:
   return NULL;
 }
 
-int sendFromCache(
-  CacheManagerT *cacheManager, const int clientSocket, const char *url) {
-  int ret = pthread_mutex_lock(&cacheManager->entriesMutex);
-  if (ret != 0) { abort(); }
-
-  CacheNodeT *node = CacheManagerT_get_CacheNodeT(cacheManager, url);
-  if (node == NULL) {
-    node = startDataUpload(cacheManager, clientSocket, url);
-    if (node == NULL) {
-      ret = pthread_mutex_unlock(&cacheManager->entriesMutex);
-      if (ret != 0) { abort(); }
-      return ERROR;
-    }
-  }
-
-  CacheEntryT_acquire(node->entry);
-  ret = pthread_mutex_unlock(&cacheManager->entriesMutex);
-  if (ret != 0) { abort(); }
-
-  CacheEntryT *cache = node->entry;
-
-  waitFirstChunkData(cache);
-
-  volatile CacheEntryChunkT *curChunk = cache->dataChunks;
+int readAndSendFromCache(const int clientSocket, CacheNodeT *node) {
+  waitFirstChunkData(node);
   int                        retVal = SUCCESS;
-  while (cache->status != Failed) {
-    const size_t writed = 0;
+  CacheEntryT *              entry = node->entry;
+  volatile CacheEntryChunkT *curChunk = entry->dataChunks;
+  while (entry->status != Failed) {
+    size_t writed = 0;
     while (curChunk->next == NULL) {
+      int    ret = 0;
       size_t curMax = curChunk->curDataSize;
-      if (curMax - writed == 0) {
-        ret = pthread_mutex_lock(&cache->dataMutex);
+      if (curMax == writed) {
+        ret = pthread_mutex_lock(&entry->dataMutex);
         if (ret != SUCCESS) { abort(); }
         curMax = curChunk->curDataSize;
-        if (curMax - writed == 0) {
-          ret = pthread_cond_wait(&cache->dataCond, &cache->dataMutex);
+        while (curMax == writed) {
+          ret = pthread_cond_wait(&entry->dataCond, &entry->dataMutex);
           if (ret != SUCCESS) {
             abort();
           }
         }
-        ret = pthread_mutex_unlock(&cache->dataMutex);
+        ret = pthread_mutex_unlock(&entry->dataMutex);
         if (ret != 0) { abort(); }
       }
       ret = sendN(clientSocket, curChunk->data + writed, curMax - writed);
       if (ret != SUCCESS) {
-        logError("%s:%d sendN %s",
-                 __FILE__, __LINE__, strerror(errno));
-        retVal = ERROR;
+        logError("%s:%d sendN %s",__FILE__, __LINE__, strerror(errno));
+        retVal = ret;
       }
+      writed = curMax;
     }
 
     const ssize_t sended = sendN(
@@ -157,13 +138,37 @@ int sendFromCache(
       retVal = ERROR;
       break;
     }
-
-    if (cache->status == Success && curChunk->next == NULL) {
+    if (entry->status == Success && curChunk->next == NULL) {
       break;
     }
     curChunk = curChunk->next;
   }
-  CacheEntryT_release(cache);
+  return retVal;
+}
+
+int sendFromCache(
+  CacheManagerT *cacheManager, const int clientSocket, const char *url
+) {
+  int ret = pthread_mutex_lock(&cacheManager->entriesMutex);
+  if (ret != 0) { abort(); }
+  CacheNodeT *node = CacheManagerT_get_CacheNodeT(cacheManager, url);
+
+  if (node == NULL) {
+    node = startDataUpload(cacheManager, clientSocket, url);
+    if (node == NULL) {
+      ret = pthread_mutex_unlock(&cacheManager->entriesMutex);
+      if (ret != 0) { abort(); }
+      return ERROR;
+    }
+  }
+
+  CacheEntryT_acquire(node->entry);
+  ret = pthread_mutex_unlock(&cacheManager->entriesMutex);
+  if (ret != 0) { abort(); }
+
+  int retvalue = readAndSendFromCache(clientSocket, node);
+  CacheEntryT_release(node->entry);
+  return retvalue;
 }
 
 void handleConnection(CacheManagerT *cacheManager,
