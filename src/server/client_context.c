@@ -23,7 +23,7 @@ void handleConnection(
   CacheManagerT *cacheManager, BufferT *buffer, int clientSocket
 );
 
-static int needCoCashing(const char *mehtod) {
+static int ableForCashing(const char *mehtod) {
   if (strcmp(mehtod, "GET") == 0) return 1;
   return 0;
 }
@@ -44,6 +44,18 @@ void handleConnectionStartUp(void *args) {
 destroyContext:
   BufferT_delete(buffer);
   free(contextArgs);
+}
+
+void waitFirstChunkData(CacheEntryT *cache) {
+  if (cache->dataChunks == NULL) {
+    if (pthread_mutex_lock(&cache->dataMutex) != 0) { abort(); }
+    while (cache->dataChunks == NULL) {
+      if (pthread_cond_wait(&cache->dataCond, &cache->dataMutex) != 0) {
+        abort();
+      }
+    }
+    if (pthread_mutex_unlock(&cache->dataMutex) != 0) { abort(); }
+  }
 }
 
 void handleConnection(CacheManagerT *cacheManager,
@@ -81,13 +93,9 @@ void handleConnection(CacheManagerT *cacheManager,
 
 
   sscanf(buffer->data, "%s %s %s", method, url, protocol);
-  if (needCoCashing(method)) {
+  if (ableForCashing(method)) {
     ret = pthread_mutex_lock(&cacheManager->entriesMutex);
-    if (ret != 0) {
-      logFatal("%s:%d pthread_mutex_lock %s",
-               __FILE__, __LINE__, strerror(errno));
-      abort();
-    }
+    if (ret != 0) { abort(); }
 
     CacheNodeT *node = CacheManagerT_get_CacheNodeT(cacheManager, url);
     if (node == NULL) {
@@ -95,22 +103,21 @@ void handleConnection(CacheManagerT *cacheManager,
       if (entry == NULL) {
         logError("%s:%d CacheEntryT_new %s",__FILE__,__LINE__, strerror(errno));
         ret = pthread_mutex_unlock(&cacheManager->entriesMutex);
-        if (ret != 0) {
-          logFatal("%s:%d pthread_mutex_unlock %s",
-                   __FILE__, __LINE__, strerror(errno));
-          abort();
-        }
+        if (ret != 0) { abort(); }
+        goto destroyContext;
       }
 
       entry->url = strdup(url);
       if (entry->url == NULL) {
         logError("%s:%d strdup %s",__FILE__,__LINE__, strerror(errno));
-        pthread_mutex_unlock(&cacheManager->entriesMutex);
+        if (pthread_mutex_unlock(&cacheManager->entriesMutex) != 0) { abort(); }
         CacheEntryT_delete(entry);
         goto destroyContext;
       }
+
       ret = handleFileUpload(entry, clientSocket);
-      if (ret != 0) {
+      if (ret != SUCCESS) {
+        if (pthread_mutex_unlock(&cacheManager->entriesMutex) != 0) { abort(); }
         CacheEntryT_delete(entry);
         goto destroyContext;
       }
@@ -120,27 +127,41 @@ void handleConnection(CacheManagerT *cacheManager,
     } else {
       CacheEntryT_acquire(node->entry);
     }
-
-    if (node->entry->dataChunks == NULL) {
-      // ret = node->entry->
-    } else {
-    }
     ret = pthread_mutex_unlock(&cacheManager->entriesMutex);
-    if (ret != 0) {
-      logFatal("%s : %d pthread_mutex_unlock %s",
-               __FILE__, __LINE__, strerror(errno)
-      );
-      abort();
+    if (ret != 0) { abort(); }
+
+    CacheEntryT *cache = node->entry;
+
+    waitFirstChunkData(cache);
+
+    volatile CacheEntryChunkT *curChunk = cache->dataChunks;
+    while (cache->status == InProcess) {
+      size_t writed = 0;
+      while (curChunk->next == NULL) {
+        size_t curMax = curChunk->curDataSize;
+        if (curMax - writed == 0) {
+          ret = pthread_mutex_lock(&cache->dataMutex);
+          if (ret != 0) { abort(); }
+          curMax = curChunk->curDataSize;
+          if (curMax - writed == 0) {
+            ret = pthread_cond_wait(&cache->dataCond, &cache->dataMutex);
+            if (ret != 0) {
+              abort();
+            }
+          }
+          ret = pthread_mutex_unlock(&cache->dataMutex);
+          if (ret != 0) { abort(); }
+        }
+        ret = sendN(clientSocket, curChunk->data + writed, curMax - writed);
+        if (ret != SUCCESS) {
+        }
+      }
     }
   } else {
   }
 
 notifyInternalError:
   sendError(clientSocket, InternalErrorStatus, "");
-  // goto destroyContext;
-
-  /*notifyInvalidURL:
-    sendError(clientSocket, BadGatewayStatus, InvalidRequestMessage);*/
 destroyContext:
   free(url);
   free(host);

@@ -24,15 +24,15 @@ enum CacheStatus {
 };
 
 struct CacheEntry {
-  char *                    url;
-  struct timeval            lastUpdate;
-  CacheEntryChunkT *        dataChunks;
-  CacheEntryChunkT *        lastChunk;
-  volatile size_t           downloadedSize;
-  volatile enum CacheStatus status;
-  volatile int              usersQ;
-  pthread_mutex_t           dataMutex;
-  pthread_cond_t            dataCond;
+  char *                     url;
+  struct timeval             lastUpdate;
+  volatile CacheEntryChunkT *dataChunks;
+  volatile CacheEntryChunkT *lastChunk;
+  volatile size_t            downloadedSize;
+  volatile enum CacheStatus  status;
+  volatile int               usersQ;
+  pthread_mutex_t            dataMutex;
+  pthread_cond_t             dataCond;
 };
 
 struct CacheEntryChunk {
@@ -69,7 +69,7 @@ void CacheEntryT_delete(CacheEntryT *entry);
 void CacheEntryT_release(CacheEntryT *entry);
 
 void CacheEntryT_updateStatus(CacheEntryT *         entry,
-                                enum CacheEntryStatus status);
+                              enum CacheEntryStatus status);
 
 void CacheEntryChunkT_delete(CacheEntryChunkT *chunk);
 
