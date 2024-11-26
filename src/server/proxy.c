@@ -1,3 +1,5 @@
+#include "proxy.h"
+
 #include <errno.h>
 
 #include "proxy.h"
@@ -17,6 +19,19 @@
 #include "../cache/cache.h"
 
 #define SERVER_BACKLOG 10
+
+const char *BadRequestStatus =
+    "400 Bad Request";
+const char *InternalErrorStatus =
+    "500 Internal Server Error";
+const char *BadGatewayStatus =
+    "502 Bad Gateway";
+const char *BadRequestMessage =
+    "Failed to read request";
+const char *InvalidRequestMessage =
+    "Invalid HTTP request format";
+const char *FailedToConnectRemoteServer =
+    "Failed to connect to destination server";
 
 void setupSigPipeIgnore(void) {
   struct sigaction sa;
@@ -59,16 +74,6 @@ int setupServerSocket(struct sockaddr_in *serverAddr, const int port) {
   return serverSocket;
 }
 
-void *clientThreadRoutine(void *args) {
-  ClientArgsT *cargs = args;
-  int          clientSocket = cargs->clientSocket;
-
-  handleRequest(clientSocket);
-  free(args);
-  close(clientSocket);
-  return NULL;
-}
-
 void startServer(const int port) {
   setupSigPipeIgnore();
   struct sockaddr_in serverAddr;
@@ -109,15 +114,23 @@ void startServer(const int port) {
       "server accepted connection: %s:%d", addrBuf, ntohs(clientAddr.sin_port)
     );
 
-    ClientThreadRoutineArgs *args = malloc(sizeof(ClientThreadRoutineArgs));
+    ClientContextArgsT *args = malloc(sizeof(*args));
     if (args == NULL) {
       logError("ClientThreadRoutineArgs malloc error: %s", strerror(errno));
-      abort();
+      sendError(clientSocket, InternalErrorStatus, "");
+      close(clientSocket);
+      continue;
     }
-
+    args->cacheManager = cacheManager;
     args->clientSocket = clientSocket;
-    pthread_t clientThreadId;
-    pthread_create(&clientThreadId, NULL, clientThreadRoutine, args);
-    pthread_detach(clientThreadId);
+    pthread_t clientThread;
+    ret = pthread_create(&clientThread, NULL, clientConnectionHandler, args);
+    if (ret < 0) {
+      logError("unable to create client thread: %s", strerror(errno));
+      sendError(clientSocket, InternalErrorStatus, "");
+      free(args);
+      continue;
+    }
+    pthread_detach(clientThread);
   }
 }

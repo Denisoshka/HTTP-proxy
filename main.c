@@ -1,11 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "src/log.h"
-#include "src/proxy.h"
+#include "src/server/proxy.h"
 
-#define ERROR -1;
-#define SUCCESS 0
+// #define ERROR -1;
+// #define SUCCESS 0
 
 int main(int argc, char **argv) {
   if (argc < 2) {

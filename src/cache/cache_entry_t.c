@@ -104,7 +104,7 @@ void CacheEntryT_delete(CacheEntryT *entry) {
   free(entry->url);
   for (volatile CacheEntryChunkT *cur = entry->dataChunks;
        cur != NULL;) {
-    volatile CacheEntryChunkT *tmp = cur;
+    CacheEntryChunkT *tmp = (CacheEntryChunkT *)cur;
     CacheEntryChunkT_delete(tmp);
     cur = cur->next;
   }
@@ -114,7 +114,7 @@ void CacheEntryT_delete(CacheEntryT *entry) {
 }
 
 void CacheEntryT_updateStatus(CacheEntryT *               entry,
-                              const enum CacheEntryStatus status) {
+                              const CacheStatusT status) {
   if (entry == NULL) return;
   int ret = pthread_mutex_lock(&entry->dataMutex);
   if (ret != 0) {

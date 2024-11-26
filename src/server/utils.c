@@ -6,36 +6,10 @@
 #include <unistd.h>
 #include <sys/socket.h>
 
+#include "proxy.h"
 #include "../utils/log.h"
 
-#define BUFFER_SIZE 4096
 #define DEF_HTTP_PORT 80
-#define ERROR (-1)
-#define SUCCESS 0
-
-ssize_t readHttpHeaders(const int    client_socket,
-                        char *       buffer,
-                        const size_t buffer_size) {
-  ssize_t total_read = 0;
-
-  while (total_read < buffer_size - 1) {
-    const ssize_t bytes_read = recv(
-      client_socket, buffer + total_read, buffer_size - total_read - 1, 0
-    );
-    if (bytes_read <= 0) {
-      return -1;
-    }
-
-    total_read += bytes_read;
-    buffer[total_read] = '\0';
-
-    if (strstr(buffer, "\r\n\r\n")) {
-      return total_read;
-    }
-  }
-  return -1;
-}
-
 
 int parseURL(const char *url, char *host, char *path, int *port) {
   *port = DEF_HTTP_PORT;
@@ -61,7 +35,7 @@ int parseURL(const char *url, char *host, char *path, int *port) {
   return SUCCESS;
 }
 
-ssize_t sendN(const int socket, const void *buffer, const size_t size) {
+ssize_t sendN(const int socket, const char *buffer, const size_t size) {
   size_t totalSent = 0;
   while (totalSent < size) {
     const ssize_t bytesSent = send(
@@ -75,18 +49,79 @@ ssize_t sendN(const int socket, const void *buffer, const size_t size) {
   return totalSent;
 }
 
-ssize_t recvN(const int socket, void *buffer, const size_t size) {
+/*ssize_t recvN(const int socket, char *buffer, const size_t size) {
   size_t totalReceived = 0;
   while (totalReceived < size) {
     const ssize_t bytesReceived = recv(
       socket, buffer + totalReceived, size - totalReceived, 0
     );
+    if (bytesReceived == 0) {
+      break;
+    }
     if (bytesReceived < 0) {
       return ERROR;
     }
+
     totalReceived += bytesReceived;
   }
   return totalReceived;
+}*/
+
+ssize_t recvNWithTimeout(
+  const int socket, char *buffer, const size_t size, const long mstimeout
+) {
+  size_t totalReceived = 0;
+  while (totalReceived < size) {
+    const ssize_t bytesReceived = recvWithTimeout(
+      socket, buffer + totalReceived, size - totalReceived, mstimeout
+    );
+    if (bytesReceived == 0 || bytesReceived == RECV_TIMEOUT_EXPIRED) {
+      break;
+    }
+    if (bytesReceived < 0) {
+      return ERROR;
+    }
+
+    totalReceived += bytesReceived;
+  }
+  return totalReceived;
+}
+
+/**
+ *
+ * @param socket
+ * @param buffer
+ * @param size
+ * @param mstimeout
+ * @return received data size if success, -1 on error, -2 on timeout
+ */
+ssize_t recvWithTimeout(
+  const int socket, char *buffer, const size_t size, const long mstimeout
+) {
+  fd_set read_fds;
+  FD_ZERO(&read_fds);
+  FD_SET(socket, &read_fds);
+
+  struct timeval timeoutSt;
+  timeoutSt.tv_sec = mstimeout / 1000;
+  timeoutSt.tv_usec = (mstimeout % 1000) * 1000;
+
+  const int ready = select(
+    socket + 1, &read_fds, NULL, NULL, &timeoutSt
+  );
+  if (ready < 0) {
+    return ERROR;
+  }
+  if (ready == 0) {
+    return RECV_TIMEOUT_EXPIRED;
+  }
+
+  // Receive
+  ssize_t received_bytes = recv(socket, buffer, size, 0);
+  if (received_bytes < 0) {
+    return ERROR;
+  }
+  return received_bytes;
 }
 
 void sendError(const int sock, const char *status, const char *message) {
@@ -103,7 +138,7 @@ void sendError(const int sock, const char *status, const char *message) {
   char *response = malloc(responseLength * sizeof(*response));
   snprintf(
     response,
-    sizeof(response),
+    responseLength * sizeof(*response),
     responseTemplate,
     status,
     strlen(message),
@@ -125,11 +160,11 @@ int getSocketOfRemote(const char *host, const int port) {
     return ERROR;
   }
 
-  int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+  int serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (serverSocket < 0) {
     logError(
       "%s : %d failed to create server socket %s",
-      __FILE__, __LINE__, strerror(errno)
+      __FILE__, __LINE__, strerror(serverSocket)
     );
     return ERROR;
   }
@@ -144,7 +179,7 @@ int getSocketOfRemote(const char *host, const int port) {
   if (ret < 0) {
     logError(
       "%s : %d failed to connect server : %s port : %d, error %s",
-      __FILE__, __LINE__, host, port, strerror(errno)
+      __FILE__, __LINE__, host, port, strerror(ret)
     );
     goto destroySocket;
   }

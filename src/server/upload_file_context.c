@@ -1,9 +1,10 @@
+#include "proxy.h"
+#include "../utils/log.h"
+
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "proxy.h"
-#include "../utils/log.h"
+#include <unistd.h>
 
 typedef struct UploadArgs {
   CacheEntryT *entry;
@@ -42,20 +43,27 @@ static CacheEntryChunkT *readSendRestBytes(
   CacheEntryT *entry,
   BufferT *    buffer
 ) {
+  const ssize_t written = sendN(remoteSocket, buffer->data, buffer->occupancy);
+  if (written < 0) {
+    return NULL;
+  }
+// todo memory leak
   CacheEntryChunkT *curChunk = CacheEntryChunkT_new(kDefCacheChunkSize);
   if (curChunk == NULL) {
     return NULL;
   }
   while (1) {
-    const ssize_t readed = recvN(
-      clientSocket, buffer->data, buffer->maxSize
+    const ssize_t readed = recvNWithTimeout(
+      clientSocket, buffer->data, buffer->maxSize,RECV_TIMEOUT
     );
-    if (readed < 0) {
+    if (readed == ERROR) {
       return NULL;
     }
+
     if (readed == 0) {
       break;
     }
+
     buffer->occupancy = readed;
 
     curChunk = fillCache(curChunk, entry, buffer);
@@ -112,8 +120,8 @@ void *fileUploaderStartup(void *args) {
 
   int uploadStatus = SUCCESS;
   while (1) {
-    const ssize_t readed = recvN(
-      remoteSocket, buffer->data, buffer->maxSize
+    const ssize_t readed = recvNWithTimeout(
+      remoteSocket, buffer->data, buffer->maxSize, RECV_TIMEOUT
     );
     if (readed < 0) {
       logError("%s:%d recv %s",__FILE__, __LINE__, strerror(errno));
@@ -133,10 +141,10 @@ void *fileUploaderStartup(void *args) {
     CacheEntryT_updateStatus(entry, InProcess);
   }
 
-  if (uploadStatus != SUCCESS) {
-    CacheEntryT_updateStatus(entry, Failed);
-  } else {
+  if (uploadStatus == SUCCESS) {
     CacheEntryT_updateStatus(entry, Success);
+  } else {
+    CacheEntryT_updateStatus(entry, Failed);
   }
 
 dectroyContext:
@@ -146,20 +154,20 @@ dectroyContext:
 
 
 int handleFileUpload(CacheEntryT *entry,
+                     BufferT *    buffer,
                      const char * host,
-                     const char * path,
                      const int    port,
-                     const int    clientSocket,
-                     BufferT *    buffer) {
+                     const int    clientSocket) {
   const int remoteSocket = getSocketOfRemote(host, port);
   if (remoteSocket < 0) {
     logError("%s, %d failed getSocketOfRemote of host:port %s:%d",
              __FILE__, __LINE__, host, port);
     sendError(clientSocket, BadGatewayStatus, FailedToConnectRemoteServer);
-    goto destroyContext;
+    return ERROR;
   }
   pthread_t    thread;
-  UploadArgsT *args = malloc(sizeof(*args));
+  UploadArgsT *args = NULL;
+  args = malloc(sizeof(*args));
   if (args == NULL) {
     logError("%s, %d malloc", __FILE__, __LINE__);
     goto uploadFailed;
@@ -181,7 +189,6 @@ int handleFileUpload(CacheEntryT *entry,
 
 uploadFailed:
   sendError(clientSocket, InternalErrorStatus, "");
-destroyContext:
   free(args);
   return ERROR;
 }

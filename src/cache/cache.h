@@ -1,7 +1,6 @@
 #ifndef CACHE_H
 #define CACHE_H
 
-#define URL_MAX_LENGTH   2048
 #include <pthread.h>
 
 #define CHECK_RET(ret, action)                                \
@@ -17,11 +16,11 @@ typedef struct CacheNode       CacheNodeT;
 typedef struct CacheManager    CacheManagerT;
 typedef struct CacheEntryChunk CacheEntryChunkT;
 
-enum CacheStatus {
+typedef enum CacheStatus {
   InProcess,
   Success,
   Failed,
-};
+}CacheStatusT;
 
 struct CacheEntry {
   char *                     url;
@@ -69,7 +68,7 @@ void CacheEntryT_delete(CacheEntryT *entry);
 void CacheEntryT_release(CacheEntryT *entry);
 
 void CacheEntryT_updateStatus(CacheEntryT *         entry,
-                              enum CacheEntryStatus status);
+                              CacheStatusT status);
 
 void CacheEntryChunkT_delete(CacheEntryChunkT *chunk);
 

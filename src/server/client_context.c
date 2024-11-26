@@ -10,12 +10,10 @@
 #include "proxy.h"
 #include "../utils/log.h"
 
-#define ERROR (-1)
-#define SUCCESS 0
-
 #define METHOD_MAX_LEN 16
 #define URL_MAX_LEN 2048
 #define PROTOCOL_MAX_LEN 16
+#define RECT_TIMEOUT 5000
 
 int getSocketOfRemote(const char *host, int port);
 
@@ -28,7 +26,7 @@ static int ableForCashing(const char *mehtod) {
   return 0;
 }
 
-void handleConnectionStartUp(void *args) {
+void *clientConnectionHandler(void *args) {
   ClientContextArgsT *contextArgs = args;
   BufferT *           buffer = BufferT_new(BUFFER_SIZE);
   const int           clientSocket = contextArgs->clientSocket;
@@ -44,6 +42,7 @@ void handleConnectionStartUp(void *args) {
 destroyContext:
   BufferT_delete(buffer);
   free(contextArgs);
+  return NULL;
 }
 
 void waitFirstChunkData(CacheNodeT *cache) {
@@ -60,7 +59,11 @@ void waitFirstChunkData(CacheNodeT *cache) {
 }
 
 CacheNodeT *startDataUpload(
-  CacheManagerT *cacheManager, const int clientSocket, const char *url
+  BufferT *   buffer,
+  const char *host,
+  const int   port,
+  const int   clientSocket,
+  const char *url
 ) {
   CacheNodeT * node = CacheNodeT_new();
   CacheEntryT *entry = CacheEntryT_new();
@@ -79,14 +82,13 @@ CacheNodeT *startDataUpload(
     goto onFailure;
   }
 
-  const int ret = handleFileUpload(entry, clientSocket);
+  const int ret = handleFileUpload(entry, buffer, host, port, clientSocket);
   if (ret != SUCCESS) {
     logError("%s:%d handleFileUpload %s",__FILE__,__LINE__, strerror(errno));
     goto onFailure;
   }
 
   node->entry = entry;
-  CacheManagerT_put_CacheNodeT(cacheManager, node);
   return node;
 
 onFailure:
@@ -146,25 +148,43 @@ int readAndSendFromCache(const int clientSocket, CacheNodeT *node) {
   return retVal;
 }
 
-int sendFromCache(
-  CacheManagerT *cacheManager, const int clientSocket, const char *url
+int sendWithCaching(
+  CacheManagerT *cacheManager,
+  BufferT *      buffer,
+  const char *   host,
+  const int      port,
+  const int      clientSocket,
+  const char *   url
 ) {
   int ret = pthread_mutex_lock(&cacheManager->entriesMutex);
-  if (ret != 0) { abort(); }
+  if (ret != 0) {
+    logFatal("%s:%d pthread_mutex_lock failed %s",
+             __FILE__, __LINE__, strerror(ret));
+    abort();
+  }
   CacheNodeT *node = CacheManagerT_get_CacheNodeT(cacheManager, url);
 
   if (node == NULL) {
-    node = startDataUpload(cacheManager, clientSocket, url);
+    node = startDataUpload(buffer, host, port, clientSocket, url);
     if (node == NULL) {
       ret = pthread_mutex_unlock(&cacheManager->entriesMutex);
-      if (ret != 0) { abort(); }
-      return ERROR;
+      if (ret != 0) {
+        logFatal("%s:%d pthread_mutex_unlock failed %s",
+                 __FILE__, __LINE__, strerror(ret));
+        abort();
+      }
+      return errno;
     }
+    CacheManagerT_put_CacheNodeT(cacheManager, node);
   }
 
   CacheEntryT_acquire(node->entry);
   ret = pthread_mutex_unlock(&cacheManager->entriesMutex);
-  if (ret != 0) { abort(); }
+  if (ret != 0) {
+    logFatal("%s:%d pthread_mutex_lock failed %s",
+             __FILE__, __LINE__, strerror(ret));
+    abort();
+  }
 
   int retvalue = readAndSendFromCache(clientSocket, node);
   CacheEntryT_release(node->entry);
@@ -175,40 +195,44 @@ void handleConnection(CacheManagerT *cacheManager,
                       BufferT *      buffer,
                       const int      clientSocket
 ) {
-  char protocol[PROTOCOL_MAX_LEN];
-  char method[METHOD_MAX_LEN];
-  struct sockaddr_in server_addr;
-  const int bytesRead = recvN(clientSocket, buffer, buffer->maxSize - 1);
+  char      protocol[PROTOCOL_MAX_LEN];
+  char      method[METHOD_MAX_LEN];
+  char *    url = NULL;
+  char *    host = NULL;
+  char *    path = NULL;
+  const int bytesRead = recvNWithTimeout(
+    clientSocket, buffer->data, buffer->maxSize - 1, RECV_TIMEOUT
+  );
   if (bytesRead <= 0) {
     logError("%s:%d failed to read request %s",
              __FILE__, __LINE__, strerror(errno));
     goto notifyInternalError;
   }
-
+  logDebug("%s:%d recvN bytesRead = %d", __FILE__, __LINE__, bytesRead);
   buffer->occupancy = bytesRead;
   buffer->data[bytesRead] = '\0';
-  char *url = malloc(URL_MAX_LEN * sizeof(*url));
-  char *host = malloc(URL_MAX_LEN * sizeof(*host));
-  char *path = malloc(URL_MAX_LEN * sizeof(*path));
+  url = malloc(URL_MAX_LEN * sizeof(*url));
+  host = malloc(URL_MAX_LEN * sizeof(*host));
+  path = malloc(URL_MAX_LEN * sizeof(*path));
   if (url == NULL || host == NULL || path == NULL) {
     logError("%s:%d failed to allocate memory",
-             __FILE__, __LINE__,errno(errno));
+             __FILE__, __LINE__, strerror(errno));
     goto notifyInternalError;
   }
 
   int port;
-  int ret = parseURL(url, host, path, &port);
+  sscanf(buffer->data, "%s %s %s", method, url, protocol);
+  const int ret = parseURL(url, host, path, &port);
   if (ret != SUCCESS) {
     logError("%s, %d failed to parse URL %s",__FILE__, __LINE__, url);
     sendError(clientSocket, BadRequestStatus, InvalidRequestMessage);
     goto destroyContext;
   }
 
-
-  sscanf(buffer->data, "%s %s %s", method, url, protocol);
   if (ableForCashing(method)) {
-    sendFromCache(cacheManager, clientSocket, url);
+    sendWithCaching(cacheManager, buffer, host, port, clientSocket, url);
   } else {
+    // todo
   }
 
 notifyInternalError:
@@ -229,6 +253,7 @@ BufferT *BufferT_new(const size_t maxOccupancy) {
     free(buffer);
     return NULL;
   }
+  buffer->maxSize = maxOccupancy;
   return buffer;
 }
 

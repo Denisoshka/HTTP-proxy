@@ -81,22 +81,13 @@ CacheNodeT *CacheManagerT_get_CacheNodeT(
 
 void CacheManagerT_put_CacheNodeT(CacheManagerT *cache, CacheNodeT *node) {
   if (node == NULL) return;
-  int ret = pthread_mutex_lock(&cache->entriesMutex);
-  if (ret != 0) {
-    logFatal("[CacheManagerT] pthread_mutex_lock failed %s", strerror(errno));
-    abort();
-  }
+
   if (cache->nodes == NULL) {
     cache->nodes = node;
     cache->lastNode = node;
   } else {
     cache->lastNode->next = node;
     cache->lastNode = node;
-  }
-  ret = pthread_mutex_unlock(&cache->entriesMutex);
-  if (ret != 0) {
-    logFatal("[CacheManagerT] pthread_mutex_unlock failed %s", strerror(errno));
-    abort();
   }
 }
 
@@ -108,7 +99,7 @@ void CacheEntryT_append_CacheEntryChunkT(
   if (ret != 0) {
     logFatal(
       "[CacheEntryT_insertNew_CacheEntryChunkT] pthread_mutex_lock : %s",
-      strerror(errno)
+      strerror(ret)
     );
     abort();
   }
@@ -117,7 +108,7 @@ void CacheEntryT_append_CacheEntryChunkT(
     entry->lastChunk = chunk;
     entry->dataChunks = chunk;
   }
-  assert(entry->lastChunk->next == chunk);
+  assert(entry->lastChunk->next != chunk);
   entry->lastChunk->next = chunk;
   entry->downloadedSize += chunk->maxDataSize;
   gettimeofday(&entry->lastUpdate, NULL);
@@ -126,7 +117,7 @@ void CacheEntryT_append_CacheEntryChunkT(
   if (ret != 0) {
     logFatal(
       "[CacheEntryT_insertNew_CacheEntryChunkT] pthread_mutex_lock : %s",
-      strerror(errno)
+      strerror(ret)
     );
     abort();
   }
@@ -146,7 +137,7 @@ void CacheManagerT_checkAndRemoveExpired_CacheNodeT(CacheManagerT *manager) {
   if (ret != 0) {
     logFatal(
       "[CacheManagerT_checkAndRemoveExpired_CacheNodeT] pthread_mutex_lock : %s",
-      strerror(errno)
+      strerror(ret)
     );
     abort();
   }
@@ -161,7 +152,7 @@ void CacheManagerT_checkAndRemoveExpired_CacheNodeT(CacheManagerT *manager) {
     if (ret != 0) {
       logFatal(
         "[CacheManagerT_checkAndRemoveExpired_CacheNodeT] pthread_mutex_trylock : %s",
-        strerror(errno)
+        strerror(ret)
       );
       abort();
     }

@@ -13,10 +13,11 @@
  */
 #define BUFFER_SIZE      16384  //16kB 
 #define SUCCESS 0
-#define ERROR 1
+#define ERROR (-1)
+#define RECV_TIMEOUT_EXPIRED (-2)
 #define HOST_MAX_LEN 1024
 #define PATH_MAX_LEN 2048
-
+#define RECV_TIMEOUT 15000
 static constexpr size_t kDefCacheChunkSize = 1024 * 1024;
 
 typedef struct ClientArgs {
@@ -24,9 +25,9 @@ typedef struct ClientArgs {
 } ClientArgsT;
 
 typedef struct Buffer {
-  char *  data;
-  ssize_t occupancy;
-  ssize_t maxSize;
+  char * data;
+  size_t occupancy;
+  size_t maxSize;
 } BufferT;
 
 typedef struct ClientContextArgs {
@@ -37,22 +38,15 @@ typedef struct ClientContextArgs {
 typedef struct FileUploadContextArgs {
   CacheEntryT *cacheEntry;
   int          clientSocket;
-  int          port = 0;
+  int          port;
 } FileUploadContextArgsT;
 
-const char *badRequestResponse =
-    "HTTP/1.1 400 Bad Request\r\n"
-    "Content-Type: text/plain\r\n"
-    "Content-Length: 15\r\n"
-    "\r\n"
-    "Invalid URL.\r\n";
-const char *BadRequestStatus = "400 Bad Request";
-const char *InternalErrorStatus = "500 Internal Server Error";
-const char *BadGatewayStatus = "502 Bad Gateway";
-const char *BadRequestMessage = "Failed to read request";
-const char *InvalidRequestMessage = "Invalid HTTP request format";
-const char *FailedToConnectRemoteServer =
-    "Failed to connect to destination server";
+extern const char *BadRequestStatus;
+extern const char *InternalErrorStatus;
+extern const char *BadGatewayStatus;
+extern const char *BadRequestMessage;
+extern const char *InvalidRequestMessage;
+extern const char *FailedToConnectRemoteServer;
 
 BufferT *BufferT_new(size_t maxOccupancy);
 
@@ -66,20 +60,30 @@ ssize_t readHttpHeaders(int client_socket, char *buffer, size_t buffer_size);
 
 void sendError(int sock, const char *status, const char *message);
 
-ssize_t sendN(int socket, const void *buffer, size_t size);
+ssize_t sendN(int socket, const char *buffer, size_t size);
 
-ssize_t recvN(int socket, void *buffer, size_t size);
+// ssize_t recvN(int socket, void *buffer, size_t size);
+
+ssize_t recvWithTimeout(int socket, char *buffer, size_t size, long mstimeout);
+
+ssize_t recvNWithTimeout(int socket, char *buffer, size_t size, long mstimeout);
 
 int parseURL(const char *url, char *host, char *path, int *port);
 
 int getSocketOfRemote(const char *host, int port);
 
-void handleRequest(int clientSocket);
-
-int handleFileUpload(CacheEntryT *entry, int clientSocket);
+int handleFileUpload(
+  CacheEntryT *entry,
+  BufferT *    buffer,
+  const char * host,
+  int          port,
+  int          clientSocket
+);
 
 void *downloadData(void *args);
 
 void startServer(int port);
+
+void *clientConnectionHandler(void *args);
 
 #endif //PROXY_H
