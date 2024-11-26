@@ -8,6 +8,7 @@ CacheEntryChunkT *CacheEntryChunkT_new(const size_t dataSize) {
   if (tmp == NULL) {
     return NULL;
   }
+  tmp->data = malloc(dataSize * sizeof(*tmp->data));
   tmp->maxDataSize = dataSize;
   tmp->curDataSize = 0;
   tmp->next = NULL;

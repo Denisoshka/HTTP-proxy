@@ -13,30 +13,6 @@ typedef struct UploadArgs {
   int          clientSocket;
 } UploadArgsT;
 
-static CacheEntryChunkT *fillCache(CacheEntryChunkT *startChunk,
-                                   CacheEntryT *     entry,
-                                   const BufferT *   buffer) {
-  size_t            added = 0;
-  CacheEntryChunkT *curChunk = startChunk;
-  while (added != buffer->occupancy) {
-    const size_t dif = curChunk->maxDataSize - curChunk->curDataSize;
-    if (dif == 0) {
-      CacheEntryT_append_CacheEntryChunkT(entry, curChunk);
-      curChunk = CacheEntryChunkT_new(kDefCacheChunkSize);
-      if (curChunk == NULL) {
-        return NULL;
-      }
-    } else {
-      memcpy(
-        curChunk->data + curChunk->curDataSize, buffer->data + added, dif
-      );
-      curChunk->curDataSize += dif;
-      added += dif;
-    }
-  }
-  return curChunk;
-}
-
 static CacheEntryChunkT *readSendRestBytes(
   const int    clientSocket,
   const int    remoteSocket,
@@ -47,11 +23,11 @@ static CacheEntryChunkT *readSendRestBytes(
   if (written < 0) {
     return NULL;
   }
-// todo memory leak
-  CacheEntryChunkT *curChunk = CacheEntryChunkT_new(kDefCacheChunkSize);
-  if (curChunk == NULL) {
-    return NULL;
-  }
+  CacheEntryChunkT *retChunk = CacheEntryT_appendData(
+    entry, buffer->data, buffer->occupancy, InProcess
+  );
+  if (retChunk == NULL) { return NULL; }
+
   while (1) {
     const ssize_t readed = recvNWithTimeout(
       clientSocket, buffer->data, buffer->maxSize,RECV_TIMEOUT
@@ -65,19 +41,18 @@ static CacheEntryChunkT *readSendRestBytes(
     }
 
     buffer->occupancy = readed;
-
-    curChunk = fillCache(curChunk, entry, buffer);
-    if (curChunk == NULL) return NULL;
-    CacheEntryT_updateStatus(entry, InProcess);
+    retChunk = CacheEntryT_appendData(
+      entry, buffer->data, buffer->occupancy, InProcess
+    );
     const ssize_t written = sendN(
       remoteSocket, buffer->data, buffer->occupancy
     );
-    if (written < 0) {
-      return NULL;
-    }
+
+    if (retChunk == NULL) { return NULL; }
+    if (written < 0) { return NULL; }
   }
 
-  return curChunk;
+  return retChunk;
 }
 
 char *strstrn(const char * haystack,
@@ -131,14 +106,16 @@ void *fileUploaderStartup(void *args) {
     if (readed == 0) {
       break;
     }
+
     buffer->occupancy = readed;
-    curChunk = fillCache(curChunk, entry, buffer);
+    curChunk = CacheEntryT_appendData(
+      entry, buffer->data, buffer->occupancy, InProcess
+    );
     if (curChunk == NULL) {
       logError("%s:%d fillCache %s",__FILE__, __LINE__, strerror(errno));
       uploadStatus = ERROR;
       break;
     }
-    CacheEntryT_updateStatus(entry, InProcess);
   }
 
   if (uploadStatus == SUCCESS) {

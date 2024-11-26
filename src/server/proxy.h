@@ -17,7 +17,16 @@
 #define RECV_TIMEOUT_EXPIRED (-2)
 #define HOST_MAX_LEN 1024
 #define PATH_MAX_LEN 2048
-#define RECV_TIMEOUT 15000
+#define RECV_TIMEOUT 3000
+
+#define CHECK_ERROR(description, ret) \
+  do { \
+    if (ret != 0) { \
+      logFatal( "%s:%d %s : %s", __FILE__, __LINE__, description, strerror(ret) ); \
+      abort(); \
+    } \
+  } while (0)
+
 static constexpr size_t kDefCacheChunkSize = 1024 * 1024;
 
 typedef struct ClientArgs {

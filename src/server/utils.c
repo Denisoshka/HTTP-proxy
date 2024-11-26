@@ -110,6 +110,7 @@ ssize_t recvWithTimeout(
     socket + 1, &read_fds, NULL, NULL, &timeoutSt
   );
   if (ready < 0) {
+    logError("%s:%d select() failed %s", __FILE__, __LINE__, strerror(errno));
     return ERROR;
   }
   if (ready == 0) {
@@ -117,11 +118,13 @@ ssize_t recvWithTimeout(
   }
 
   // Receive
-  ssize_t received_bytes = recv(socket, buffer, size, 0);
-  if (received_bytes < 0) {
+  const ssize_t receivedBytes = recv(socket, buffer, size, 0);
+  if (receivedBytes < 0) {
+    logError("%s:%d select() failed %s",
+             __FILE__, __LINE__, strerror(errno));
     return ERROR;
   }
-  return received_bytes;
+  return receivedBytes;
 }
 
 void sendError(const int sock, const char *status, const char *message) {

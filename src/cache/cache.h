@@ -3,12 +3,12 @@
 
 #include <pthread.h>
 
-#define CHECK_RET(ret, action)                                \
-  do {                                                        \
-    if ((ret) != 0) {                                         \
-      logFatal("[Error] %s : %s", action, strerror(ret));     \
-      abort();                                                \
-    }                                                         \
+#define CHECK_RET(description, ret) \
+  do { \
+    if (ret != 0) { \
+      logFatal( "%s:%d %s : %s", __FILE__, __LINE__, description, strerror(ret)); \
+      abort(); \
+    } \
   } while (0)
 
 typedef struct CacheEntry      CacheEntryT;
@@ -20,7 +20,7 @@ typedef enum CacheStatus {
   InProcess,
   Success,
   Failed,
-}CacheStatusT;
+} CacheStatusT;
 
 struct CacheEntry {
   char *                     url;
@@ -67,7 +67,7 @@ void CacheEntryT_delete(CacheEntryT *entry);
 
 void CacheEntryT_release(CacheEntryT *entry);
 
-void CacheEntryT_updateStatus(CacheEntryT *         entry,
+void CacheEntryT_updateStatus(CacheEntryT *entry,
                               CacheStatusT status);
 
 void CacheEntryChunkT_delete(CacheEntryChunkT *chunk);
@@ -91,5 +91,8 @@ CacheEntryT *CacheEntryT_new_withUrl(const char *url);
 
 void CacheManagerT_checkAndRemoveExpired_CacheNodeT(CacheManagerT *manager);
 
+CacheEntryChunkT *CacheEntryT_appendData(
+  CacheEntryT *entry, const char *data, size_t dataSize, CacheStatusT status
+);
 #undef URL_MAX_LENGTH
 #endif

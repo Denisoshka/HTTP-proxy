@@ -116,13 +116,14 @@ int readAndSendFromCache(const int clientSocket, CacheNodeT *node) {
           if (ret != SUCCESS) {
             abort();
           }
+          curMax = curChunk->curDataSize;
         }
         ret = pthread_mutex_unlock(&entry->dataMutex);
         if (ret != 0) { abort(); }
       }
       ret = sendN(clientSocket, curChunk->data + writed, curMax - writed);
-      if (ret != SUCCESS) {
-        logError("%s:%d sendN %s",__FILE__, __LINE__, strerror(errno));
+      if (ret < 0) {
+        logError("%s:%d sendN %s",__FILE__, __LINE__, strerror(ret));
         retVal = ret;
       }
       writed = curMax;

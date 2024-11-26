@@ -69,8 +69,10 @@ static int checkLogLevel(int log_level_) {
   return log_level >= log_level_;
 }
 
-static void logCommon(const char *log_level_, const char *color,
-                      const char *format, va_list         args) {
+static void logCommon(const char *log_level_,
+                      const char *color,
+                      const char *format,
+                      va_list     args) {
   struct timeval tv;
   gettimeofday(&tv, 0);
 
@@ -85,7 +87,7 @@ static void logCommon(const char *log_level_, const char *color,
 
   char msg[MAX_LOG_MESSAGE_LENGTH + 1];
   snprintf(msg, MAX_LOG_MESSAGE_LENGTH,
-           "%d-%02d-%02d %02d:%02d:%02d.%03ld --- [%15s] %s%5s%s : %s",
+           "%d-%02d-%02d %02d:%02d:%02d.%03ld --- [%15s] %s%5s%s : %.500s",
            tm->tm_year + 1900,
            tm->tm_mon + 1,
            tm->tm_mday,

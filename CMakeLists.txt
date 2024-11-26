@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.29)
 project(proxy C)
 
-set(CMAKE_C_FLAGS "-O2 -Wall -Werror -Wextra -pedantic")
+set(CMAKE_C_FLAGS "-Wall -Werror -Wextra -pedantic")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_GNU_SOURCE")
 set(CMAKE_C_STANDARD 23)
 set(BIN_NAME cache-proxy)

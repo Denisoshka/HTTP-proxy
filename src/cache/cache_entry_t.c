@@ -1,3 +1,5 @@
+#include <assert.h>
+
 #include "cache.h"
 #include "../utils/log.h"
 
@@ -5,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+
+#include "../server/proxy.h"
 
 CacheEntryT *CacheEntryT_new() {
   CacheEntryT *tmp = malloc(sizeof(*tmp));
@@ -54,57 +58,32 @@ destroyAtMalloc:
 
 void CacheEntryT_release(CacheEntryT *entry) {
   int ret = pthread_mutex_lock(&entry->dataMutex);
-  if (ret != 0) {
-    logFatal(
-      "[CacheManagerT_acquire_CacheNodeT] pthread_mutex_lock failed %s",
-      strerror(errno)
-    );
-    abort();
-  }
+  CHECK_ERROR("pthread_mutex_lock", ret);
 
   entry->usersQ--;
   gettimeofday(&entry->lastUpdate, NULL);
 
   ret = pthread_mutex_unlock(&entry->dataMutex);
-  if (ret != 0) {
-    logFatal(
-      "[CacheManagerT_acquire_CacheNodeT] pthread_mutex_unlock failed %s",
-      strerror(errno)
-    );
-    abort();
-  }
+  CHECK_RET(pthread_mutex_unlock, ret);
 }
 
 void CacheEntryT_acquire(CacheEntryT *entry) {
   int ret = pthread_mutex_lock(&entry->dataMutex);
-  if (ret != 0) {
-    logFatal(
-      "[CacheEntryT_acquire] pthread_mutex_lock failed %s",
-      strerror(errno)
-    );
-    abort();
-  }
+  CHECK_RET("pthread_mutex_lock", ret);
 
   entry->usersQ++;
   gettimeofday(&entry->lastUpdate, NULL);
 
   ret = pthread_mutex_unlock(&entry->dataMutex);
-  if (ret != 0) {
-    logFatal(
-      "[CacheManagerT_get_CacheNodeT] pthread_mutex_unlock failed %s",
-      strerror(errno)
-    );
-    abort();
-  }
+  CHECK_RET("pthread_mutex_unlock", ret);
 }
-
 
 void CacheEntryT_delete(CacheEntryT *entry) {
   if (entry == NULL) return;
   free(entry->url);
   for (volatile CacheEntryChunkT *cur = entry->dataChunks;
        cur != NULL;) {
-    CacheEntryChunkT *tmp = (CacheEntryChunkT *)cur;
+    CacheEntryChunkT *tmp = (CacheEntryChunkT *) cur;
     CacheEntryChunkT_delete(tmp);
     cur = cur->next;
   }
@@ -113,27 +92,76 @@ void CacheEntryT_delete(CacheEntryT *entry) {
   if (pthread_cond_destroy(&entry->dataCond) != 0)abort();
 }
 
-void CacheEntryT_updateStatus(CacheEntryT *               entry,
+void CacheEntryT_updateStatus(CacheEntryT *      entry,
                               const CacheStatusT status) {
   if (entry == NULL) return;
   int ret = pthread_mutex_lock(&entry->dataMutex);
-  if (ret != 0) {
-    logFatal("[CacheEntryT_uploadFinished] pthread_mutex_lock %s",
-             strerror(errno));
-    abort();
-  }
+  CHECK_RET("pthread_mutex_lock", ret);
+
   entry->status = status;
   gettimeofday(&entry->lastUpdate, NULL);
   ret = pthread_cond_broadcast(&entry->dataCond);
-  if (ret != 0) {
-    logFatal("[CacheEntryT_uploadFinished] pthread_cond_broadcast %s",
-             strerror(errno));
-    abort();
-  }
+
+  CHECK_RET("pthread_cond_broadcast", ret);
+
   ret = pthread_mutex_unlock(&entry->dataMutex);
-  if (ret != 0) {
-    logFatal("[CacheEntryT_uploadFinished] pthread_mutex_unlock %s",
-             strerror(errno));
-    abort();
+  CHECK_RET("pthread_mutex_unlock", ret);
+}
+
+CacheEntryChunkT *CacheEntryT_appendData(
+  CacheEntryT *      entry,
+  const char *       data,
+  const size_t       dataSize,
+  const CacheStatusT status
+) {
+  if (dataSize <= 0) return (CacheEntryChunkT *) entry->lastChunk;
+  size_t                     added = 0;
+  volatile CacheEntryChunkT *retval = NULL;
+  int                        ret = pthread_mutex_lock(&entry->dataMutex);
+  CHECK_RET("pthread_mutex_lock", ret);
+  if (entry->dataChunks == NULL) {
+    CacheEntryChunkT *iniChunk = CacheEntryChunkT_new(kDefCacheChunkSize);
+    if (iniChunk == NULL) {
+      entry->status = Failed;
+      goto onExit;
+    }
+    CacheEntryT_append_CacheEntryChunkT(entry, iniChunk);
   }
+
+  retval = entry->lastChunk;
+  while (added < dataSize) {
+    assert(retval->curDataSize <= retval->maxDataSize);
+
+    const size_t freeSpace = retval->maxDataSize - retval->curDataSize;
+    if (freeSpace == 0) {
+      retval = CacheEntryChunkT_new(kDefCacheChunkSize);
+      if (retval == NULL) {
+        logError("%s:%d cache entry chunk allocation failed: %s",
+                 __LINE__, __FILE__, strerror(errno));
+        entry->status = Failed;
+        goto onExit;
+      }
+      CacheEntryT_append_CacheEntryChunkT(entry, (CacheEntryChunkT *) retval);
+    } else {
+      const size_t toCopy = dataSize - added < freeSpace
+                              ? dataSize - added
+                              : freeSpace;
+      void *      dest = retval->data + retval->curDataSize;
+      const void *src = data + added;
+
+      memcpy(dest, src, toCopy);
+
+      retval->curDataSize += toCopy;
+      added += toCopy;
+    }
+  }
+  entry->status = status;
+
+onExit:
+  ret = pthread_cond_broadcast(&entry->dataCond);
+  CHECK_RET("pthread_cond_broadcast", ret);
+
+  ret = pthread_mutex_unlock(&entry->dataMutex);
+  CHECK_RET("pthread_mutex_unlock", ret);
+  return (CacheEntryChunkT *) retval;
 }
