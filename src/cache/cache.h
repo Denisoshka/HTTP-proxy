@@ -23,22 +23,22 @@ typedef enum CacheStatus {
 } CacheStatusT;
 
 struct CacheEntry {
-  char *                     url;
-  struct timeval             lastUpdate;
-  volatile CacheEntryChunkT *dataChunks;
-  volatile CacheEntryChunkT *lastChunk;
-  volatile size_t            downloadedSize;
-  volatile enum CacheStatus  status;
-  volatile int               usersQ;
-  pthread_mutex_t            dataMutex;
-  pthread_cond_t             dataCond;
+  char *                              url;
+  struct timeval                      lastUpdate;
+  volatile CacheEntryChunkT *volatile dataChunks;
+  volatile CacheEntryChunkT *volatile lastChunk;
+  volatile size_t                     downloadedSize;
+  volatile CacheStatusT               status;
+  volatile int                        usersQ;
+  pthread_mutex_t                     dataMutex;
+  pthread_cond_t                      dataCond;
 };
 
 struct CacheEntryChunk {
-  size_t                  curDataSize;
-  size_t                  maxDataSize;
-  struct CacheEntryChunk *next;
-  char *                  data;
+  size_t                              curDataSize;
+  size_t                              maxDataSize;
+  volatile CacheEntryChunkT * next;
+  char *                              data;
 };
 
 struct CacheNode {

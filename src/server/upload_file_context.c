@@ -130,11 +130,11 @@ dectroyContext:
 }
 
 
-int handleFileUpload(CacheEntryT *entry,
-                     BufferT *    buffer,
-                     const char * host,
-                     const int    port,
-                     const int    clientSocket) {
+int handleFileUpload(CacheEntryT *  entry,
+                     const BufferT *buffer,
+                     const char *   host,
+                     const int      port,
+                     const int      clientSocket) {
   const int remoteSocket = getSocketOfRemote(host, port);
   if (remoteSocket < 0) {
     logError("%s, %d failed getSocketOfRemote of host:port %s:%d",
@@ -149,7 +149,14 @@ int handleFileUpload(CacheEntryT *entry,
     logError("%s, %d malloc", __FILE__, __LINE__);
     goto uploadFailed;
   }
-  args->buffer = buffer;
+  BufferT *copyOfBuffer = BufferT_new(buffer->maxSize);
+  if (copyOfBuffer == NULL) {
+    logError("%s, %d BufferT_new %s", __FILE__, __LINE__, strerror(errno));
+    goto uploadFailed;
+  }
+
+  memcpy(copyOfBuffer->data, buffer->data, buffer->maxSize);
+  args->buffer = copyOfBuffer;
   args->remoteSocket = remoteSocket;
   args->clientSocket = clientSocket;
   args->entry = entry;

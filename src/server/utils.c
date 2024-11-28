@@ -35,14 +35,14 @@ int parseURL(const char *url, char *host, char *path, int *port) {
   return SUCCESS;
 }
 
-ssize_t sendN(const int socket, const char *buffer, const size_t size) {
+size_t sendN(const int socket, const char *buffer, const size_t size) {
   size_t totalSent = 0;
   while (totalSent < size) {
     const ssize_t bytesSent = send(
       socket, buffer + totalSent, size - totalSent, 0
     );
     if (bytesSent < 0) {
-      return -1;
+      return totalSent;
     }
     totalSent += bytesSent;
   }
@@ -110,7 +110,9 @@ ssize_t recvWithTimeout(
     socket + 1, &read_fds, NULL, NULL, &timeoutSt
   );
   if (ready < 0) {
-    logError("%s:%d select() failed %s", __FILE__, __LINE__, strerror(errno));
+    int savedErrno = errno;
+    logError("%s:%d select() failed %s", __FILE__, __LINE__,
+             strerror(savedErrno));
     return ERROR;
   }
   if (ready == 0) {
@@ -120,7 +122,7 @@ ssize_t recvWithTimeout(
   // Receive
   const ssize_t receivedBytes = recv(socket, buffer, size, 0);
   if (receivedBytes < 0) {
-    logError("%s:%d select() failed %s",
+    logError("%s:%d recv %s",
              __FILE__, __LINE__, strerror(errno));
     return ERROR;
   }

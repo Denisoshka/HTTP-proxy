@@ -40,7 +40,9 @@ void *clientConnectionHandler(void *args) {
   }
   handleConnection(cacheManager, buffer, clientSocket);
 destroyContext:
+  logInfo("client with socket : %d finished", clientSocket);
   BufferT_delete(buffer);
+  close(clientSocket);
   free(contextArgs);
   return NULL;
 }
@@ -97,55 +99,121 @@ onFailure:
   return NULL;
 }
 
-int readAndSendFromCache(const int clientSocket, CacheNodeT *node) {
-  waitFirstChunkData(node);
-  int                        retVal = SUCCESS;
-  CacheEntryT *              entry = node->entry;
-  volatile CacheEntryChunkT *curChunk = entry->dataChunks;
-  while (entry->status != Failed) {
-    size_t writed = 0;
-    while (curChunk->next == NULL) {
-      int    ret = 0;
-      size_t curMax = curChunk->curDataSize;
-      if (curMax == writed) {
-        ret = pthread_mutex_lock(&entry->dataMutex);
-        if (ret != SUCCESS) { abort(); }
-        curMax = curChunk->curDataSize;
-        while (curMax == writed) {
-          ret = pthread_cond_wait(&entry->dataCond, &entry->dataMutex);
-          if (ret != SUCCESS) {
-            abort();
-          }
-          curMax = curChunk->curDataSize;
-        }
-        ret = pthread_mutex_unlock(&entry->dataMutex);
-        if (ret != 0) { abort(); }
-      }
-      ret = sendN(clientSocket, curChunk->data + writed, curMax - writed);
-      if (ret < 0) {
-        logError("%s:%d sendN %s",__FILE__, __LINE__, strerror(ret));
-        retVal = ret;
-      }
-      writed = curMax;
+void waitData(
+  CacheEntryChunkT *waitChunk,
+  CacheEntryT *     entry,
+  const size_t      writted) {
+}
+
+static volatile CacheEntryChunkT *waitFirstChunk(const CacheNodeT *node) {
+  volatile CacheEntryT *     entry = node->entry;
+  volatile CacheEntryChunkT *curChunk = NULL;
+  while (1) {
+    curChunk = entry->dataChunks;
+    CacheStatusT status = entry->status;
+    if (status == Failed || curChunk != NULL) {
+      break;
     }
 
-    const ssize_t sended = sendN(
-      clientSocket, curChunk->data + writed, curChunk->curDataSize - writed
-    );
-    if (sended == 0) {
-      break;
+    int ret = pthread_mutex_lock((pthread_mutex_t *) &entry->dataMutex);
+    CHECK_RET("pthread_mutex_lock", ret);
+    while (1) {
+      curChunk = entry->dataChunks;
+      status = entry->status;
+      if (status == Failed || curChunk != NULL) {
+        break;
+      }
+
+      ret = pthread_cond_wait(
+        (pthread_cond_t *) &entry->dataCond,
+        (pthread_mutex_t *) &entry->dataMutex
+      );
+      CHECK_RET("pthread_cond_wait", ret);
     }
-    if (sended < 0) {
-      logError("%s:%d sendN %s",
-               __FILE__, __LINE__, strerror(errno));
-      retVal = ERROR;
-      break;
-    }
-    if (entry->status == Success && curChunk->next == NULL) {
-      break;
-    }
-    curChunk = curChunk->next;
+    ret = pthread_mutex_unlock((pthread_mutex_t *) &entry->dataMutex);
+    CHECK_RET("pthread_mutex_unlock", ret);
   }
+  return curChunk;
+}
+
+static int readDataFromChunks(
+  const int clientSocket, volatile CacheEntryT *cacheEntry
+) {
+  for (
+    const volatile CacheEntryChunkT *chunk = cacheEntry->dataChunks;
+    chunk != NULL && cacheEntry->status != Failed;
+    chunk = chunk->next
+  ) {
+    size_t written = 0;
+    int    ret = 0;
+    for (
+      size_t writeLimit = chunk->curDataSize;
+      chunk->next == NULL && writeLimit == written
+      && cacheEntry->status == InProcess;
+      writeLimit = chunk->curDataSize
+    ) {
+      ret = pthread_mutex_lock((pthread_mutex_t *) &cacheEntry->dataMutex);
+      CHECK_RET("pthread_mutex_lock", ret);
+      for (
+        size_t newWriteLimit = chunk->curDataSize;
+        chunk->next == NULL && newWriteLimit == written
+        && cacheEntry->status == InProcess;
+        newWriteLimit = chunk->curDataSize
+      ) {
+        ret = pthread_cond_wait(
+          (pthread_cond_t *) &cacheEntry->dataCond,
+          (pthread_mutex_t *) &cacheEntry->dataMutex
+        );
+        CHECK_RET("pthread_cond_wait", ret);
+      }
+      ret = pthread_mutex_unlock((pthread_mutex_t *) &cacheEntry->dataMutex);
+      CHECK_RET("pthread_mutex_unlock", ret);
+
+      const size_t sent = sendN(
+        clientSocket, chunk->data + written, writeLimit - written
+      );
+      if (errno != 0) {
+        logError("%s:%d sendN %s",__FILE__,__LINE__, strerror(errno));
+        return ERROR;
+      }
+      if (sent == 0) {
+        return SUCCESS;
+      }
+
+      written = writeLimit;
+    }
+
+    const size_t dataSize = chunk->curDataSize;
+    if (written != dataSize) {
+      const size_t sent = sendN(
+        clientSocket, chunk->data + written, dataSize - written
+      );
+      if (errno != 0) {
+        logError("%s:%d sendN %s",__FILE__,__LINE__, strerror(errno));
+        return ERROR;
+      }
+      if (sent == 0) {
+        return SUCCESS;
+      }
+    }
+  }
+
+  if (cacheEntry->status == Failed) {
+    return ERROR;
+  }
+  return SUCCESS;
+}
+
+int readAndSendFromCache(const int clientSocket, CacheNodeT *node) {
+  waitFirstChunkData(node);
+  int                              retVal = SUCCESS;
+  const volatile CacheEntryChunkT *firstChunk = waitFirstChunk(node);
+  if (firstChunk != NULL) {
+    retVal = readDataFromChunks(clientSocket, node->entry);
+  }
+  if (retVal == ERROR) {
+  }
+  logInfo("client with socket : %d finished", clientSocket);
   return retVal;
 }
 

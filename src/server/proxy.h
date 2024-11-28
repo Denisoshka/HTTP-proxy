@@ -69,7 +69,7 @@ ssize_t readHttpHeaders(int client_socket, char *buffer, size_t buffer_size);
 
 void sendError(int sock, const char *status, const char *message);
 
-ssize_t sendN(int socket, const char *buffer, size_t size);
+size_t sendN(int socket, const char *buffer, size_t size);
 
 // ssize_t recvN(int socket, void *buffer, size_t size);
 
@@ -82,11 +82,11 @@ int parseURL(const char *url, char *host, char *path, int *port);
 int getSocketOfRemote(const char *host, int port);
 
 int handleFileUpload(
-  CacheEntryT *entry,
-  BufferT *    buffer,
-  const char * host,
-  int          port,
-  int          clientSocket
+  CacheEntryT *  entry,
+  const BufferT *buffer,
+  const char *   host,
+  int            port,
+  int            clientSocket
 );
 
 void *downloadData(void *args);
