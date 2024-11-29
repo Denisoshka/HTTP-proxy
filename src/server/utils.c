@@ -49,24 +49,6 @@ size_t sendN(const int socket, const char *buffer, const size_t size) {
   return totalSent;
 }
 
-/*ssize_t recvN(const int socket, char *buffer, const size_t size) {
-  size_t totalReceived = 0;
-  while (totalReceived < size) {
-    const ssize_t bytesReceived = recv(
-      socket, buffer + totalReceived, size - totalReceived, 0
-    );
-    if (bytesReceived == 0) {
-      break;
-    }
-    if (bytesReceived < 0) {
-      return ERROR;
-    }
-
-    totalReceived += bytesReceived;
-  }
-  return totalReceived;
-}*/
-
 ssize_t recvNWithTimeout(
   const int socket, char *buffer, const size_t size, const long mstimeout
 ) {

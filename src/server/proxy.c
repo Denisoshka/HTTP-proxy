@@ -42,7 +42,7 @@ void setupSigPipeIgnore(void) {
 }
 
 int setupServerSocket(struct sockaddr_in *serverAddr, const int port) {
-  int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+  const int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
   if (serverSocket < 0) {
     perror("create socket failure");
     abort();
