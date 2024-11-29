@@ -13,46 +13,33 @@ typedef struct UploadArgs {
   int          clientSocket;
 } UploadArgsT;
 
-static CacheEntryChunkT *readSendRestBytes(
-  const int    clientSocket,
-  const int    remoteSocket,
-  CacheEntryT *entry,
-  BufferT *    buffer
+static int readSendRestBytes(
+  const int clientSocket,
+  const int remoteSocket,
+  BufferT * buffer
 ) {
-  const ssize_t written = sendN(remoteSocket, buffer->data, buffer->occupancy);
-  if (written < 0) {
-    return NULL;
+  sendN(remoteSocket, buffer->data, buffer->occupancy);
+  if (errno != 0) {
+    logError("%s:%d sendN %s",__FILE__,__LINE__, strerror(errno));
+    return ERROR;
   }
-  CacheEntryChunkT *retChunk = CacheEntryT_appendData(
-    entry, buffer->data, buffer->occupancy, InProcess
-  );
-  if (retChunk == NULL) { return NULL; }
 
   while (1) {
     const ssize_t readed = recvNWithTimeout(
       clientSocket, buffer->data, buffer->maxSize,RECV_TIMEOUT
     );
     if (readed == ERROR) {
-      return NULL;
+      return ERROR;
     }
-
     if (readed == 0) {
       break;
     }
-
-    buffer->occupancy = readed;
-    retChunk = CacheEntryT_appendData(
-      entry, buffer->data, buffer->occupancy, InProcess
-    );
-    const ssize_t written = sendN(
+    sendN(
       remoteSocket, buffer->data, buffer->occupancy
     );
-
-    if (retChunk == NULL) { return NULL; }
-    if (written < 0) { return NULL; }
+    if (errno != 0) { return ERROR; }
   }
-
-  return retChunk;
+  return SUCCESS;
 }
 
 char *strstrn(const char * haystack,
@@ -84,10 +71,10 @@ void *fileUploaderStartup(void *args) {
   const int    remoteSocket = uploadArgs->remoteSocket;
   const int    clientSocket = uploadArgs->clientSocket;
 
-  CacheEntryChunkT *curChunk = readSendRestBytes(
-    clientSocket, remoteSocket, entry, buffer
+  int ret = readSendRestBytes(
+    clientSocket, remoteSocket, buffer
   );
-  if (curChunk == NULL) {
+  if (ret < 0) {
     logError("%s:%d readRestBytes %s", __FILE__,__LINE__, strerror(errno));
     CacheEntryT_updateStatus(entry, Failed);
     goto dectroyContext;
@@ -108,7 +95,7 @@ void *fileUploaderStartup(void *args) {
     }
 
     buffer->occupancy = readed;
-    curChunk = CacheEntryT_appendData(
+    CacheEntryChunkT * curChunk = CacheEntryT_appendData(
       entry, buffer->data, buffer->occupancy, InProcess
     );
     if (curChunk == NULL) {
@@ -157,6 +144,7 @@ int handleFileUpload(CacheEntryT *  entry,
 
   memcpy(copyOfBuffer->data, buffer->data, buffer->maxSize);
   args->buffer = copyOfBuffer;
+  args->buffer->occupancy = buffer->occupancy;
   args->remoteSocket = remoteSocket;
   args->clientSocket = clientSocket;
   args->entry = entry;

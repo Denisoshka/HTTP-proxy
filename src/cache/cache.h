@@ -35,10 +35,10 @@ struct CacheEntry {
 };
 
 struct CacheEntryChunk {
-  size_t                              curDataSize;
-  size_t                              maxDataSize;
-  volatile CacheEntryChunkT * next;
-  char *                              data;
+  size_t                     curDataSize;
+  size_t                     maxDataSize;
+  volatile CacheEntryChunkT *next;
+  char *                     data;
 };
 
 struct CacheNode {

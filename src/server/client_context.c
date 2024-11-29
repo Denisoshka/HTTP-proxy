@@ -99,12 +99,6 @@ onFailure:
   return NULL;
 }
 
-void waitData(
-  CacheEntryChunkT *waitChunk,
-  CacheEntryT *     entry,
-  const size_t      writted) {
-}
-
 static volatile CacheEntryChunkT *waitFirstChunk(const CacheNodeT *node) {
   volatile CacheEntryT *     entry = node->entry;
   volatile CacheEntryChunkT *curChunk = NULL;
@@ -198,6 +192,11 @@ static int readDataFromChunks(
     }
   }
 
+  logInfo(
+    "client %d receive data with status %d",
+    clientSocket, cacheEntry->status
+  );
+
   if (cacheEntry->status == Failed) {
     return ERROR;
   }
@@ -255,9 +254,9 @@ int sendWithCaching(
     abort();
   }
 
-  int retvalue = readAndSendFromCache(clientSocket, node);
+  int retValue = readAndSendFromCache(clientSocket, node);
   CacheEntryT_release(node->entry);
-  return retvalue;
+  return retValue;
 }
 
 void handleConnection(CacheManagerT *cacheManager,
