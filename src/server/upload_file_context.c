@@ -13,35 +13,6 @@ typedef struct UploadArgs {
   int          clientSocket;
 } UploadArgsT;
 
-static int readSendRestBytes(
-  const int clientSocket,
-  const int remoteSocket,
-  BufferT * buffer
-) {
-  sendN(remoteSocket, buffer->data, buffer->occupancy);
-  if (errno != 0) {
-    logError("%s:%d sendN %s",__FILE__,__LINE__, strerror(errno));
-    return ERROR;
-  }
-
-  while (1) {
-    const ssize_t readed = recvNWithTimeout(
-      clientSocket, buffer->data, buffer->maxSize,RECV_TIMEOUT
-    );
-    if (readed == ERROR) {
-      return ERROR;
-    }
-    if (readed == 0) {
-      break;
-    }
-    sendN(
-      remoteSocket, buffer->data, buffer->occupancy
-    );
-    if (errno != 0) { return ERROR; }
-  }
-  return SUCCESS;
-}
-
 char *strstrn(const char * haystack,
               const size_t haystackLen,
               const char * needle,
@@ -65,25 +36,14 @@ char *strstrn(const char * haystack,
 }*/
 
 void *fileUploaderStartup(void *args) {
-  UploadArgsT *uploadArgs = args;
-  CacheEntryT *entry = uploadArgs->entry;
-  BufferT *    buffer = uploadArgs->buffer;
+  UploadArgsT *uploadArgs   = args;
+  CacheEntryT *entry        = uploadArgs->entry;
+  BufferT *    buffer       = uploadArgs->buffer;
   const int    remoteSocket = uploadArgs->remoteSocket;
-  const int    clientSocket = uploadArgs->clientSocket;
-
-  int ret = readSendRestBytes(
-    clientSocket, remoteSocket, buffer
-  );
-  if (ret < 0) {
-    logError("%s:%d readRestBytes %s", __FILE__,__LINE__, strerror(errno));
-    CacheEntryT_updateStatus(entry, Failed);
-    goto dectroyContext;
-  }
-
-  int uploadStatus = SUCCESS;
+  int          uploadStatus = SUCCESS;
   while (1) {
     const ssize_t readed = recvNWithTimeout(
-      remoteSocket, buffer->data, buffer->maxSize, RECV_TIMEOUT
+      remoteSocket, buffer->data, buffer->maxSize, SEND_RECV_TIMEOUT
     );
     if (readed < 0) {
       logError("%s:%d recv %s",__FILE__, __LINE__, strerror(errno));
@@ -94,8 +54,8 @@ void *fileUploaderStartup(void *args) {
       break;
     }
 
-    buffer->occupancy = readed;
-    CacheEntryChunkT * curChunk = CacheEntryT_appendData(
+    buffer->occupancy          = readed;
+    CacheEntryChunkT *curChunk = CacheEntryT_appendData(
       entry, buffer->data, buffer->occupancy, InProcess
     );
     if (curChunk == NULL) {
@@ -111,27 +71,16 @@ void *fileUploaderStartup(void *args) {
     CacheEntryT_updateStatus(entry, Failed);
   }
 
-dectroyContext:
   free(uploadArgs);
   return NULL;
 }
 
-
 int handleFileUpload(CacheEntryT *  entry,
                      const BufferT *buffer,
-                     const char *   host,
-                     const int      port,
-                     const int      clientSocket) {
-  const int remoteSocket = getSocketOfRemote(host, port);
-  if (remoteSocket < 0) {
-    logError("%s, %d failed getSocketOfRemote of host:port %s:%d",
-             __FILE__, __LINE__, host, port);
-    sendError(clientSocket, BadGatewayStatus, FailedToConnectRemoteServer);
-    return ERROR;
-  }
+                     const int      clientSocket, const int remoteSocket) {
   pthread_t    thread;
   UploadArgsT *args = NULL;
-  args = malloc(sizeof(*args));
+  args              = malloc(sizeof(*args));
   if (args == NULL) {
     logError("%s, %d malloc", __FILE__, __LINE__);
     goto uploadFailed;
@@ -143,18 +92,21 @@ int handleFileUpload(CacheEntryT *  entry,
   }
 
   memcpy(copyOfBuffer->data, buffer->data, buffer->maxSize);
-  args->buffer = copyOfBuffer;
+  args->buffer            = copyOfBuffer;
   args->buffer->occupancy = buffer->occupancy;
-  args->remoteSocket = remoteSocket;
-  args->clientSocket = clientSocket;
-  args->entry = entry;
-  const int ret = pthread_create(&thread,NULL, fileUploaderStartup, args);
+  args->remoteSocket      = remoteSocket;
+  args->clientSocket      = clientSocket;
+  args->entry             = entry;
+
+  int ret = pthread_create(&thread,NULL, fileUploaderStartup, args);
   if (ret != 0) {
     logError("%s, %d pthread_create", __FILE__, __LINE__);
     goto uploadFailed;
   }
-  if (pthread_detach(thread) != 0) {
-    logError("%s, %d pthread_detach", __FILE__, __LINE__);
+
+  ret = pthread_detach(thread);
+  if (ret < 0) {
+    CHECK_RET("pthread_detach", ret);
     abort();
   }
   return SUCCESS;

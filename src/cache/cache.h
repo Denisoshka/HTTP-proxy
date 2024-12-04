@@ -30,6 +30,7 @@ struct CacheEntry {
   volatile size_t                     downloadedSize;
   volatile CacheStatusT               status;
   volatile int                        usersQ;
+  volatile int                        httpStatusCode;
   pthread_mutex_t                     dataMutex;
   pthread_cond_t                      dataCond;
 };

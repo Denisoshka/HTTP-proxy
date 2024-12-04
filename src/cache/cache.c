@@ -83,11 +83,11 @@ void CacheManagerT_put_CacheNodeT(CacheManagerT *cache, CacheNodeT *node) {
   if (node == NULL) return;
 
   if (cache->nodes == NULL) {
-    cache->nodes = node;
+    cache->nodes    = node;
     cache->lastNode = node;
   } else {
     cache->lastNode->next = node;
-    cache->lastNode = node;
+    cache->lastNode       = node;
   }
 }
 
@@ -97,13 +97,13 @@ void CacheEntryT_append_CacheEntryChunkT(
   if (chunk == NULL) return;
 
   if (entry->dataChunks == NULL) {
-    entry->lastChunk = chunk;
+    entry->lastChunk  = chunk;
     entry->dataChunks = chunk;
     return;
   }
 
   entry->lastChunk->next = chunk;
-  entry->lastChunk = chunk;
+  entry->lastChunk       = chunk;
   entry->downloadedSize += chunk->maxDataSize;
   gettimeofday(&entry->lastUpdate, NULL);
 }
@@ -117,7 +117,7 @@ void CacheManagerT_checkAndRemoveExpired_CacheNodeT(CacheManagerT *manager) {
 
   for (CacheNodeT **current = &manager->nodes; (*current) != NULL;) {
     CacheNodeT *node = *current;
-    ret = pthread_mutex_trylock(&node->entry->dataMutex);
+    ret              = pthread_mutex_trylock(&node->entry->dataMutex);
     if (ret == EBUSY) continue;
     CHECK_RET("pthread_mutex_trylock", ret);
 

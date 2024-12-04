@@ -14,10 +14,10 @@
 #define BUFFER_SIZE      16384  //16kB 
 #define SUCCESS 0
 #define ERROR (-1)
-#define RECV_TIMEOUT_EXPIRED (-2)
+#define TIMEOUT_EXPIRED (-2)
 #define HOST_MAX_LEN 1024
 #define PATH_MAX_LEN 2048
-#define RECV_TIMEOUT 3000
+#define SEND_RECV_TIMEOUT 3000
 
 #define CHECK_ERROR(description, ret) \
   do { \
@@ -75,18 +75,35 @@ size_t sendN(int socket, const char *buffer, size_t size);
 
 ssize_t recvWithTimeout(int socket, char *buffer, size_t size, long mstimeout);
 
-ssize_t recvNWithTimeout(int socket, char *buffer, size_t size, long mstimeout);
+size_t recvNWithTimeout(int socket, char *buffer, size_t size, long mstimeout);
+
+/**
+ * @param socket
+ * @param buffer
+ * @param size
+ * @param mstimeout
+ * @return sent data size if success, -1 on error, -2 on timeout
+ */
+ssize_t sendWithTimeout(
+  int socket, const char *buffer, size_t size, long mstimeout
+);
+
+size_t sendNWithTimeout(
+  int socket, const char *buffer, size_t size, long mstimeout
+);
 
 int parseURL(const char *url, char *host, char *path, int *port);
 
 int getSocketOfRemote(const char *host, int port);
 
+int forwardDataWithTimeout(
+  int clientSocket, int remoteSocket, long timeout, BufferT *buffer
+);
+
 int handleFileUpload(
   CacheEntryT *  entry,
   const BufferT *buffer,
-  const char *   host,
-  int            port,
-  int            clientSocket
+  int            clientSocket, int remoteSocket
 );
 
 void *downloadData(void *args);

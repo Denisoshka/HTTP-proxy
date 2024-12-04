@@ -13,7 +13,8 @@
 #define METHOD_MAX_LEN 16
 #define URL_MAX_LEN 2048
 #define PROTOCOL_MAX_LEN 16
-#define RECT_TIMEOUT 5000
+#define MAX_RESPONSE_LEN 16
+#define SUCCESS_STATUS 200
 
 int getSocketOfRemote(const char *host, int port);
 
@@ -27,8 +28,8 @@ static int ableForCashing(const char *mehtod) {
 }
 
 void *clientConnectionHandler(void *args) {
-  ClientContextArgsT *contextArgs = args;
-  BufferT *           buffer = BufferT_new(BUFFER_SIZE);
+  ClientContextArgsT *contextArgs  = args;
+  BufferT *           buffer       = BufferT_new(BUFFER_SIZE);
   const int           clientSocket = contextArgs->clientSocket;
   CacheManagerT *     cacheManager = contextArgs->cacheManager;
 
@@ -50,32 +51,128 @@ destroyContext:
 void waitFirstChunkData(const volatile CacheNodeT *cache) {
   CacheEntryT *entry = cache->entry;
   if (entry->status != Failed && entry->dataChunks == NULL) {
-    if (pthread_mutex_lock(&entry->dataMutex) != 0) { abort(); }
+    int ret = pthread_mutex_lock(&entry->dataMutex);
+    CHECK_RET("pthread_mutex_lock", ret);
+
     while (entry->status != Failed && entry->dataChunks == NULL) {
-      if (pthread_cond_wait(&entry->dataCond, &entry->dataMutex) != 0) {
-        abort();
-      }
+      ret = pthread_cond_wait(&entry->dataCond, &entry->dataMutex);
+      CHECK_RET("pthread_cond_wait", ret);
     }
-    if (pthread_mutex_unlock(&entry->dataMutex) != 0) { abort(); }
+
+    ret = pthread_mutex_unlock(&entry->dataMutex);
+    CHECK_RET("pthread_mutex_unlock", ret);
   }
 }
 
+int sendBufferAndForwardData(
+  BufferT * buffer,
+  const int src,
+  const int dest
+) {
+  ssize_t ret = sendNWithTimeout(
+    dest, buffer->data, buffer->occupancy,SEND_RECV_TIMEOUT
+  );
+  if (ret == ERROR || ret == TIMEOUT_EXPIRED) {
+    logError(
+      "%s:%d failed to forward request", __FILE__, __LINE__, strerror(errno)
+    );
+    return ret;
+  }
+  ret = forwardDataWithTimeout(
+    src, dest, SEND_RECV_TIMEOUT, buffer
+  );
+
+  if (ret != SUCCESS) {
+    return ERROR;
+  }
+  return SUCCESS;
+}
+
+/**
+ * receive part to @code buffer
+ * of response and check status
+ * @param remoteSocket
+ * @param buffer
+ * @return ERROR if error occurs, else response status
+ */
+static int receiveCheckResponseStatus(const int remoteSocket, BufferT *buffer) {
+  char   protocolBuffer[MAX_RESPONSE_LEN]; // Буфер для данных из сокета
+  int    statusCode;
+  size_t received = recvNWithTimeout(
+    remoteSocket, buffer->data, buffer->occupancy, SEND_RECV_TIMEOUT
+  );
+  if (errno != 0) {
+    logError(
+      "%s:%d failed to receive response", __FILE__, __LINE__, strerror(errno)
+    );
+    return ERROR;
+  }
+
+  buffer->occupancy = received;
+
+  if (sscanf(buffer->data, "%s %d", protocolBuffer, &statusCode) == 2) {
+    if (strncmp(protocolBuffer, "HTTP/", 5) == 0) {
+      return statusCode; // Возвращаем код состояния
+    }
+  }
+
+  return ERROR;
+}
+
+/**
+ *
+ * @param buffer
+ * @param host
+ * @param port
+ * @param clientSocket
+ * @param url
+ * @param responseStatus
+ * @return
+ */
 CacheNodeT *startDataUpload(
   BufferT *   buffer,
   const char *host,
   const int   port,
   const int   clientSocket,
-  const char *url
+  const char *url,
+  int *       responseStatus
 ) {
-  CacheNodeT * node = CacheNodeT_new();
-  CacheEntryT *entry = CacheEntryT_new();
+  *responseStatus    = ERROR;
+  CacheNodeT * node  = NULL;
+  CacheEntryT *entry = NULL;
 
-  if (entry == NULL) {
-    logError("%s:%d CacheEntryT_new %s",__FILE__,__LINE__, strerror(errno));
+  const int remoteSocket = getSocketOfRemote(host, port);
+  if (remoteSocket < 0) {
+    logError("%s, %d failed getSocketOfRemote of host:port %s:%d",
+             __FILE__, __LINE__, host, port);
+    sendError(clientSocket, BadGatewayStatus, FailedToConnectRemoteServer);
+    return NULL;
+  }
+
+  int ret = sendBufferAndForwardData(buffer, clientSocket, remoteSocket);
+  if (ret != SUCCESS) {
     goto onFailure;
   }
+
+  const int status = receiveCheckResponseStatus(remoteSocket, buffer);
+  if (status < 0) {
+    goto onFailure;
+  }
+  *responseStatus = status;
+  if (status != SUCCESS_STATUS) {
+    sendBufferAndForwardData(buffer, remoteSocket, clientSocket);
+    goto onFailure;
+  }
+
+  node  = CacheNodeT_new();
+  entry = CacheEntryT_new();
+
   if (node == NULL) {
     logError("%s:%d CacheNodeT_new %s",__FILE__,__LINE__, strerror(errno));
+    goto onFailure;
+  }
+  if (entry == NULL) {
+    logError("%s:%d CacheEntryT_new %s",__FILE__,__LINE__, strerror(errno));
     goto onFailure;
   }
   entry->url = strdup(url);
@@ -84,7 +181,7 @@ CacheNodeT *startDataUpload(
     goto onFailure;
   }
 
-  const int ret = handleFileUpload(entry, buffer, host, port, clientSocket);
+  ret = handleFileUpload(entry, buffer, clientSocket, remoteSocket);
   if (ret != SUCCESS) {
     logError("%s:%d handleFileUpload %s",__FILE__,__LINE__, strerror(errno));
     goto onFailure;
@@ -96,14 +193,15 @@ CacheNodeT *startDataUpload(
 onFailure:
   CacheEntryT_delete(entry);
   CacheNodeT_delete(node);
+  close(remoteSocket);
   return NULL;
 }
 
 static volatile CacheEntryChunkT *waitFirstChunk(const CacheNodeT *node) {
-  volatile CacheEntryT *     entry = node->entry;
+  volatile CacheEntryT *     entry    = node->entry;
   volatile CacheEntryChunkT *curChunk = NULL;
   while (1) {
-    curChunk = entry->dataChunks;
+    curChunk            = entry->dataChunks;
     CacheStatusT status = entry->status;
     if (status == Failed || curChunk != NULL) {
       break;
@@ -113,7 +211,7 @@ static volatile CacheEntryChunkT *waitFirstChunk(const CacheNodeT *node) {
     CHECK_RET("pthread_mutex_lock", ret);
     while (1) {
       curChunk = entry->dataChunks;
-      status = entry->status;
+      status   = entry->status;
       if (status == Failed || curChunk != NULL) {
         break;
       }
@@ -217,7 +315,7 @@ static int readDataFromChunks(
 
 int readAndSendFromCache(const int clientSocket, CacheNodeT *node) {
   waitFirstChunkData(node);
-  int                              retVal = SUCCESS;
+  int                              retVal     = SUCCESS;
   const volatile CacheEntryChunkT *firstChunk = waitFirstChunk(node);
   if (firstChunk != NULL) {
     retVal = readDataFromChunks(clientSocket, node->entry);
@@ -229,7 +327,7 @@ int readAndSendFromCache(const int clientSocket, CacheNodeT *node) {
   return retVal;
 }
 
-int sendWithCaching(
+int sendWithCachingIfNecessary(
   CacheManagerT *cacheManager,
   BufferT *      buffer,
   const char *   host,
@@ -238,36 +336,37 @@ int sendWithCaching(
   const char *   url
 ) {
   int ret = pthread_mutex_lock(&cacheManager->entriesMutex);
-  if (ret != 0) {
-    logFatal("%s:%d pthread_mutex_lock failed %s",
-             __FILE__, __LINE__, strerror(ret));
-    abort();
-  }
+  CHECK_RET("pthread_mutex_lock", ret);
+
   CacheNodeT *node = CacheManagerT_get_CacheNodeT(cacheManager, url);
 
   if (node == NULL) {
-    node = startDataUpload(buffer, host, port, clientSocket, url);
+    int responseStatus = 0;
+
+    node = startDataUpload(
+      buffer, host, port, clientSocket, url, &responseStatus
+    );
     if (node == NULL) {
-      ret = pthread_mutex_unlock(&cacheManager->entriesMutex);
-      if (ret != 0) {
-        logFatal("%s:%d pthread_mutex_unlock failed %s",
-                 __FILE__, __LINE__, strerror(ret));
-        abort();
+      int retval = 0;
+      if (responseStatus < 0) {
+        retval = errno;
+      } else if (responseStatus != SUCCESS_STATUS) {
+        retval = 0;
       }
-      return errno;
+
+      ret = pthread_mutex_unlock(&cacheManager->entriesMutex);
+      CHECK_RET("pthread_mutex_unlock", ret);
+      return retval;
     }
+
     CacheManagerT_put_CacheNodeT(cacheManager, node);
   }
 
   CacheEntryT_acquire(node->entry);
   ret = pthread_mutex_unlock(&cacheManager->entriesMutex);
-  if (ret != 0) {
-    logFatal("%s:%d pthread_mutex_lock failed %s",
-             __FILE__, __LINE__, strerror(ret));
-    abort();
-  }
+  CHECK_RET("pthread_mutex_lock", ret);
 
-  int retValue = readAndSendFromCache(clientSocket, node);
+  const int retValue = readAndSendFromCache(clientSocket, node);
   CacheEntryT_release(node->entry);
   return retValue;
 }
@@ -278,11 +377,11 @@ void handleConnection(CacheManagerT *cacheManager,
 ) {
   char      protocol[PROTOCOL_MAX_LEN];
   char      method[METHOD_MAX_LEN];
-  char *    url = NULL;
-  char *    host = NULL;
-  char *    path = NULL;
+  char *    url       = NULL;
+  char *    host      = NULL;
+  char *    path      = NULL;
   const int bytesRead = recvNWithTimeout(
-    clientSocket, buffer->data, buffer->maxSize - 1, RECV_TIMEOUT
+    clientSocket, buffer->data, buffer->maxSize - 1, SEND_RECV_TIMEOUT
   );
   if (bytesRead <= 0) {
     logError("%s:%d failed to read request %s",
@@ -290,11 +389,11 @@ void handleConnection(CacheManagerT *cacheManager,
     goto notifyInternalError;
   }
   logDebug("%s:%d recvN bytesRead = %d", __FILE__, __LINE__, bytesRead);
-  buffer->occupancy = bytesRead;
+  buffer->occupancy       = bytesRead;
   buffer->data[bytesRead] = '\0';
-  url = malloc(URL_MAX_LEN * sizeof(*url));
-  host = malloc(URL_MAX_LEN * sizeof(*host));
-  path = malloc(URL_MAX_LEN * sizeof(*path));
+  url                     = malloc(URL_MAX_LEN * sizeof(*url));
+  host                    = malloc(URL_MAX_LEN * sizeof(*host));
+  path                    = malloc(URL_MAX_LEN * sizeof(*path));
   if (url == NULL || host == NULL || path == NULL) {
     logError("%s:%d failed to allocate memory",
              __FILE__, __LINE__, strerror(errno));
@@ -311,7 +410,7 @@ void handleConnection(CacheManagerT *cacheManager,
   }
 
   if (ableForCashing(method)) {
-    sendWithCaching(cacheManager, buffer, host, port, clientSocket, url);
+    sendWithCachingIfNecessary(cacheManager, buffer, host, port, clientSocket, url);
   } else {
     // todo
   }
