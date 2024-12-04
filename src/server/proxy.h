@@ -17,7 +17,7 @@
 #define TIMEOUT_EXPIRED (-2)
 #define HOST_MAX_LEN 1024
 #define PATH_MAX_LEN 2048
-#define SEND_RECV_TIMEOUT 3000
+#define SEND_RECV_TIMEOUT 1000
 
 #define CHECK_ERROR(description, ret) \
   do { \

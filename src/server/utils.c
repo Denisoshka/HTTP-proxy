@@ -189,10 +189,10 @@ int forwardDataWithTimeout(
   BufferT *  buffer
 ) {
   while (1) {
-    const ssize_t readed = recvNWithTimeout(
+    const size_t readed = recvNWithTimeout(
       clientSocket, buffer->data, timeout, buffer->maxSize
     );
-    if (readed == ERROR) {
+    if (errno != 0) {
       return ERROR;
     }
     if (readed == 0) {

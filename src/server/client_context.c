@@ -69,14 +69,14 @@ int sendBufferAndForwardData(
   const int src,
   const int dest
 ) {
-  ssize_t ret = sendNWithTimeout(
+  size_t ret = sendNWithTimeout(
     dest, buffer->data, buffer->occupancy,SEND_RECV_TIMEOUT
   );
-  if (ret == ERROR || ret == TIMEOUT_EXPIRED) {
+  if (errno != 0 || ret != buffer->occupancy) {
     logError(
       "%s:%d failed to forward request", __FILE__, __LINE__, strerror(errno)
     );
-    return ret;
+    return ERROR;
   }
   ret = forwardDataWithTimeout(
     src, dest, SEND_RECV_TIMEOUT, buffer
@@ -181,6 +181,7 @@ CacheNodeT *startDataUpload(
     goto onFailure;
   }
 
+  CacheEntryT_appendData(entry, buffer->data, buffer->occupancy, InProcess);
   ret = handleFileUpload(entry, buffer, clientSocket, remoteSocket);
   if (ret != SUCCESS) {
     logError("%s:%d handleFileUpload %s",__FILE__,__LINE__, strerror(errno));
@@ -410,7 +411,8 @@ void handleConnection(CacheManagerT *cacheManager,
   }
 
   if (ableForCashing(method)) {
-    sendWithCachingIfNecessary(cacheManager, buffer, host, port, clientSocket, url);
+    sendWithCachingIfNecessary(cacheManager, buffer, host, port, clientSocket,
+                               url);
   } else {
     // todo
   }

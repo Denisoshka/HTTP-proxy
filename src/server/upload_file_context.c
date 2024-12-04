@@ -42,10 +42,10 @@ void *fileUploaderStartup(void *args) {
   const int    remoteSocket = uploadArgs->remoteSocket;
   int          uploadStatus = SUCCESS;
   while (1) {
-    const ssize_t readed = recvNWithTimeout(
+    const size_t readed = recvNWithTimeout(
       remoteSocket, buffer->data, buffer->maxSize, SEND_RECV_TIMEOUT
     );
-    if (readed < 0) {
+    if (errno != 0) {
       logError("%s:%d recv %s",__FILE__, __LINE__, strerror(errno));
       uploadStatus = ERROR;
       break;
@@ -85,15 +85,13 @@ int handleFileUpload(CacheEntryT *  entry,
     logError("%s, %d malloc", __FILE__, __LINE__);
     goto uploadFailed;
   }
-  BufferT *copyOfBuffer = BufferT_new(buffer->maxSize);
-  if (copyOfBuffer == NULL) {
+  BufferT *uploadBuffer = BufferT_new(buffer->maxSize);
+  if (uploadBuffer == NULL) {
     logError("%s, %d BufferT_new %s", __FILE__, __LINE__, strerror(errno));
     goto uploadFailed;
   }
 
-  memcpy(copyOfBuffer->data, buffer->data, buffer->maxSize);
-  args->buffer            = copyOfBuffer;
-  args->buffer->occupancy = buffer->occupancy;
+  args->buffer            = uploadBuffer;
   args->remoteSocket      = remoteSocket;
   args->clientSocket      = clientSocket;
   args->entry             = entry;
@@ -107,11 +105,11 @@ int handleFileUpload(CacheEntryT *  entry,
   ret = pthread_detach(thread);
   if (ret < 0) {
     CHECK_RET("pthread_detach", ret);
-    abort();
   }
   return SUCCESS;
 
 uploadFailed:
+  BufferT_delete(uploadBuffer);
   sendError(clientSocket, InternalErrorStatus, "");
   free(args);
   return ERROR;
